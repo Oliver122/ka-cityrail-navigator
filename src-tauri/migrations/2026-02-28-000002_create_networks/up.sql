@@ -1,0 +1,4 @@
+CREATE TABLE IF NOT EXISTS networks (
+    ssid TEXT PRIMARY KEY NOT NULL,
+    label TEXT NOT NULL
+);
