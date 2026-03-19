@@ -1,0 +1,323 @@
+/* ══════════════════════════════════════════════════════════════════════════════
+   Departure Details - Transit Editorial Design
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+.details-page {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  background: #0d0d18;
+  padding-bottom: 5rem;
+}
+
+.details-header {
+  display: flex;
+  align-items: center;
+  padding: 1rem;
+  background: #08080f;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+.details-header h1 {
+  flex: 1;
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: #e9e6f7;
+  text-align: center;
+  margin: 0;
+  letter-spacing: -0.01em;
+}
+
+.header-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.icon-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 42px;
+  height: 42px;
+  background: rgba(43, 42, 60, 0.6);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: none;
+  border-radius: 50%;
+  color: #a8a4b8;
+  cursor: pointer;
+  transition: all 0.2s ease-in-out;
+}
+
+.icon-button:hover {
+  background: #2b2a3c;
+  color: #e9e6f7;
+}
+
+/* Route Info Card - Tonal Layering */
+.details-card {
+  background: #12121e;
+  border-radius: 0.75rem;
+  margin: 1rem;
+  padding: 1.25rem;
+  box-shadow: inset 0 1px 0 0 #7b6fd8;
+}
+
+.route-info-card {
+  padding: 1.5rem;
+}
+
+.route-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 1.125rem;
+  margin-bottom: 1.5rem;
+}
+
+.route-destination {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.route-direction {
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: #e9e6f7;
+  letter-spacing: -0.01em;
+}
+
+.route-from {
+  font-size: 0.85rem;
+  color: #6b6880;
+}
+
+.route-timing {
+  display: flex;
+  gap: 2rem;
+  padding-top: 1.25rem;
+}
+
+.timing-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.timing-label {
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: #6b6880;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+
+.timing-value {
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: #e9e6f7;
+  letter-spacing: -0.02em;
+}
+
+.timing-planned {
+  font-size: 0.8rem;
+  color: #6b6880;
+  text-decoration: line-through;
+}
+
+.timing-status {
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+
+.status-ontime {
+  color: #4adeaa;
+}
+
+.status-delayed {
+  color: #ff7a6b;
+}
+
+.status-early {
+  color: #4adeaa;
+}
+
+/* Disruption Banner */
+.disruption-banner {
+  display: flex;
+  align-items: center;
+  gap: 0.875rem;
+  margin: 0 1rem;
+  padding: 1rem 1.25rem;
+  background: #4a2a2a;
+  border-radius: 0.75rem;
+  color: #ff7a6b;
+  font-size: 0.9rem;
+  font-weight: 500;
+}
+
+.disruption-icon {
+  flex-shrink: 0;
+}
+
+/* Card Title */
+.card-title {
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: #6b6880;
+  margin: 0 0 1.25rem 0;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+
+/* Route Timeline - Tonal Depth */
+.route-timeline {
+  display: flex;
+  flex-direction: column;
+}
+
+.timeline-stop {
+  display: flex;
+  gap: 1.125rem;
+  min-height: 3.75rem;
+}
+
+.timeline-line-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 20px;
+  position: relative;
+}
+
+.timeline-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #32324a;
+  z-index: 1;
+  flex-shrink: 0;
+}
+
+.timeline-line {
+  width: 2px;
+  flex: 1;
+  background: #242434;
+}
+
+.timeline-line-top {
+  margin-bottom: -2px;
+}
+
+.timeline-line-bottom {
+  margin-top: -2px;
+}
+
+/* Timeline stop states */
+.timeline-stop-passed .timeline-dot {
+  background: #242434;
+}
+
+.timeline-stop-passed .timeline-line {
+  background: #1e1e2c;
+}
+
+.timeline-stop-passed .timeline-stop-name {
+  color: #6b6880;
+}
+
+.timeline-stop-current .timeline-dot {
+  background: #a89af8;
+  box-shadow: 0 0 0 4px rgba(168, 154, 248, 0.25);
+}
+
+.timeline-stop-current .timeline-stop-name {
+  color: #e9e6f7;
+  font-weight: 700;
+}
+
+.timeline-stop-upcoming .timeline-dot {
+  background: #1a1a28;
+  box-shadow: inset 0 0 0 2px #a89af8;
+}
+
+.timeline-stop-upcoming .timeline-stop-name {
+  color: #a8a4b8;
+}
+
+.timeline-content {
+  flex: 1;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  padding-bottom: 1.125rem;
+}
+
+.timeline-stop-info {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.timeline-stop-name {
+  font-size: 0.95rem;
+  color: #a8a4b8;
+}
+
+.timeline-platform {
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: #6b6880;
+  letter-spacing: 0.05em;
+}
+
+.timeline-time {
+  font-size: 0.9rem;
+  color: #a8a4b8;
+  text-align: right;
+}
+
+.time-delayed {
+  color: #ff7a6b;
+}
+
+.delay-badge {
+  display: inline-block;
+  margin-left: 0.5rem;
+  padding: 0.15rem 0.4rem;
+  background: #4a2a2a;
+  border-radius: 0.375rem;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+/* Map Button - Primary with Gradient */
+.map-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  margin: 1rem;
+  padding: 1.125rem;
+  background: linear-gradient(135deg, #a89af8 0%, #3d3870 100%);
+  border: none;
+  border-radius: 0.75rem;
+  color: #e8e4ff;
+  font-size: 1rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: transform 0.15s ease-in-out, box-shadow 0.15s ease-in-out;
+}
+
+.map-button:hover {
+  transform: scale(1.02);
+  box-shadow: 0 8px 24px rgba(168, 154, 248, 0.25);
+}
+
+.map-button svg {
+  width: 20px;
+  height: 20px;
+}

@@ -1,30 +1,31 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentPosition, requestPermissions } from "@tauri-apps/plugin-geolocation";
 import { Stop, ManualCoords, loadStarred, saveStarred, loadManualCoords } from "./storage";
-import { ConnectionInfo } from "./types";
+import { ConnectionInfo, AppPage, DepartureDetail, RouteStop } from "./types";
+import { 
+  BottomNav, 
+  LineBadge,
+  ProximityMap,
+  WifiIcon, 
+  EthernetIcon, 
+  SearchIcon, 
+  FilterIcon, 
+  RefreshIcon,
+  LocationIcon,
+  ChevronDownIcon,
+  ChevronUpIcon,
+  StarIcon,
+} from "./components";
+import type { MapBounds } from "./components";
+import "./components/ProximityMap.css";
 import Settings from "./Settings";
+import DepartureDetails from "./DepartureDetails";
 import "./App.css";
 
 interface NetworkInfo {
   ssid: string;
   label: string;
-}
-
-function ConnectionIcon({ type }: { type: "wifi" | "ethernet" }) {
-  if (type === "ethernet") return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
-      <rect x="2" y="8" width="4" height="8" rx="1"/>
-      <rect x="10" y="8" width="4" height="8" rx="1"/>
-      <rect x="18" y="8" width="4" height="8" rx="1"/>
-      <path d="M4 12h4M12 12h4M4 4h16v4H4zM4 16h4v4H4zM10 16h4v4h-4zM18 16h4v4h-4z"/>
-    </svg>
-  );
-  return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-      <path d="M1.5 8.5a16.5 16.5 0 0 1 21 0M5 12.5a12 12 0 0 1 14 0M8.5 16.5a7.5 7.5 0 0 1 7 0M12 21h.01"/>
-    </svg>
-  );
 }
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -44,15 +45,6 @@ interface Departure {
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
-/** MoT type codes from the KVV API mapped to brand colours. */
-const MOT_COLORS: Record<string, string> = {
-  "1": "#009060", // S-Bahn
-  "2": "#003d8f", // Stadtbahn / U-Bahn
-  "4": "#cc0000", // Tram
-  "5": "#0066bb", // Bus
-};
-const MOT_COLOR_DEFAULT = "#555";
-
 /** When countdown exceeds this value (minutes) show real_time instead of "N min". */
 const MAX_COUNTDOWN_DISPLAY_MIN = 20;
 
@@ -67,32 +59,68 @@ function haversineKm(lat1: number, lon1: number, lat2: number, lon2: number): nu
 }
 
 function formatDist(km: number): string {
-  return km < 1 ? `${Math.round(km * 1000)} m` : `${km.toFixed(1)} km`;
+  return km < 1 ? `${Math.round(km * 1000)}m` : `${km.toFixed(1)}km`;
 }
 
-function motColor(motType: string): string {
-  return MOT_COLORS[motType] ?? MOT_COLOR_DEFAULT;
+function formatCountdown(countdown: number, realTime: string): { text: string; className: string } {
+  if (countdown <= 0) return { text: "now", className: "eta-now" };
+  if (countdown <= MAX_COUNTDOWN_DISPLAY_MIN) return { text: `${countdown} min`, className: "eta-soon" };
+  return { text: realTime, className: "eta-later" };
 }
 
-function DelayBadge({ delay }: { delay: number }) {
-  if (delay === 0) return <span className="on-time">pünktlich</span>;
-  if (delay > 0) return <span className="delayed">+{delay}</span>;
-  return <span className="early">{delay}</span>;
+// Create mock route stops for departure details
+function createMockRouteStops(departure: Departure, stopName: string): RouteStop[] {
+  return [
+    { id: "1", name: "Hauptbahnhof", arrivalTime: departure.planned_time, status: "passed" },
+    { id: "2", name: stopName, arrivalTime: departure.real_time, status: "current", delayMinutes: departure.delay_minutes },
+    { id: "3", name: "Marktplatz", arrivalTime: "", status: "upcoming" },
+    { id: "4", name: departure.direction, arrivalTime: "", status: "upcoming" },
+  ];
 }
 
 // ── App ───────────────────────────────────────────────────────────────────────
 
 function App() {
-  const [page, setPage] = useState<"main" | "settings">("main");
+  const [page, setPage] = useState<AppPage>("departures");
   const [nearbyStops, setNearbyStops] = useState<Stop[]>([]);
+  const [mapStops, setMapStops] = useState<Stop[]>([]);
+  const [mapLoading, setMapLoading] = useState(false);
   const [starredStops, setStarredStops] = useState<Stop[]>(loadStarred);
   const [manualCoords, setManualCoords] = useState<ManualCoords>(loadManualCoords);
   const [departures, setDepartures] = useState<Record<string, Departure[]>>({});
   const [userLocation, setUserLocation] = useState<{ lat: number; lon: number } | null>(null);
-  const [status, setStatus] = useState("Standort wird ermittelt…");
   const [error, setError] = useState<string | null>(null);
   const [manualMode, setManualMode] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [selectedDeparture, setSelectedDeparture] = useState<DepartureDetail | null>(null);
+  
+  // Track last fetched bounds to avoid duplicate requests
+  const lastBoundsRef = useRef<string>("");
+
+  // Fetch stops within map bounds
+  const handleMapBoundsChange = useCallback(async (bounds: MapBounds) => {
+    // Create a key to detect if bounds significantly changed
+    const boundsKey = `${bounds.center.lat.toFixed(4)},${bounds.center.lon.toFixed(4)},${bounds.radiusKm.toFixed(2)}`;
+    if (boundsKey === lastBoundsRef.current) return;
+    lastBoundsRef.current = boundsKey;
+    
+    setMapLoading(true);
+    try {
+      // Fetch stops for the visible map area (increased limit for map view)
+      const stops = await invoke<Stop[]>("fetch_stops_near", {
+        latitude: bounds.center.lat,
+        longitude: bounds.center.lon,
+        radiusKm: Math.min(bounds.radiusKm * 1.5, 10), // Cap at 10km
+        limit: 50,
+      });
+      setMapStops(stops);
+    } catch (e) {
+      console.error("Failed to fetch map stops:", e);
+    } finally {
+      setMapLoading(false);
+    }
+  }, []);
 
   const toggleStar = useCallback((stop: Stop) => {
     setStarredStops((prev) => {
@@ -115,13 +143,11 @@ function App() {
   const loadFrom = useCallback(async (latitude: number, longitude: number) => {
     setUserLocation({ lat: latitude, lon: longitude });
     setError(null);
-    setStatus(`Standort: ${latitude.toFixed(4)}, ${longitude.toFixed(4)} – Haltestellen werden geladen…`);
     try {
       const nearby = await invoke<Stop[]>("fetch_stops_near", {
         latitude, longitude, radiusKm: 1.5, limit: 8,
       });
       setNearbyStops(nearby);
-      setStatus(`${nearby.length} Haltestellen in der Nähe`);
 
       // Also load departures for starred stops not already in the nearby list
       const starred = loadStarred();
@@ -150,20 +176,17 @@ function App() {
         if (perms.location !== "granted") {
           const saved = loadManualCoords();
           setManualMode(true);
-          setStatus(`GPS verweigert – verwende gespeicherte Position (${saved.lat}, ${saved.lon})`);
           await loadFrom(saved.lat, saved.lon);
           setRefreshing(false);
           return;
         }
-        setStatus("Standort wird ermittelt…");
         const pos = await getCurrentPosition({ enableHighAccuracy: true, timeout: 10000, maximumAge: 30000 });
         setManualMode(false);
         await loadFrom(pos.coords.latitude, pos.coords.longitude);
-      } catch (e) {
+      } catch {
         // GPS failed — silently fall back to saved manual coords
         const saved = loadManualCoords();
         setManualMode(true);
-        setStatus(`GPS nicht verfügbar – verwende gespeicherte Position (${saved.lat}, ${saved.lon})`);
         await loadFrom(saved.lat, saved.lon);
       } finally {
         setRefreshing(false);
@@ -241,122 +264,269 @@ function App() {
   const starredNotPinned = starredStops.filter((s) => !networkPinnedIds.has(s.id));
   const nearbyOnly = nearbyStops.filter((s) => !starredIds.has(s.id) && !networkPinnedIds.has(s.id));
 
-  const displayStops = [
+  // Filter by search query
+  const filterBySearch = (stops: Stop[]) => {
+    if (!searchQuery.trim()) return stops;
+    const q = searchQuery.toLowerCase();
+    return stops.filter((s) => s.name.toLowerCase().includes(q));
+  };
+
+  const displayStops = filterBySearch([
     ...sortByDist(networkStops),
     ...sortByDist(starredNotPinned),
     ...nearbyOnly,
-  ];
+  ]);
 
+  // Handle departure click to show details
+  const handleDepartureClick = (stop: Stop, dep: Departure) => {
+    const detail: DepartureDetail = {
+      id: `${stop.id}-${dep.line}-${dep.planned_time}`,
+      line: dep.line,
+      lineType: dep.line_type,
+      motType: dep.mot_type,
+      direction: dep.direction,
+      platform: dep.platform,
+      plannedTime: dep.planned_time,
+      realTime: dep.real_time,
+      delayMinutes: dep.delay_minutes,
+      countdown: dep.countdown,
+      stopName: stop.name,
+      routeStops: createMockRouteStops(dep, stop.name),
+      disruption: dep.delay_minutes > 5 ? `Delay of ${dep.delay_minutes} minutes due to operational issues` : undefined,
+    };
+    setSelectedDeparture(detail);
+    setPage("details");
+  };
+
+  // Handle navigation
+  const handleNavigate = (newPage: AppPage) => {
+    if (newPage === "departures") {
+      setSelectedDeparture(null);
+    }
+    setPage(newPage);
+  };
+
+  // Settings page
   if (page === "settings") {
     return (
-      <Settings
-        starred={starredStops}
-        manualCoords={manualCoords}
-        onStarredChange={handleStarredChange}
-        onCoordsChange={handleCoordsChange}
-        onBack={() => setPage("main")}
-      />
+      <>
+        <Settings
+          starred={starredStops}
+          manualCoords={manualCoords}
+          onStarredChange={handleStarredChange}
+          onCoordsChange={handleCoordsChange}
+        />
+        <BottomNav currentPage={page} onNavigate={handleNavigate} />
+      </>
     );
   }
 
+  // Departure Details page
+  if (page === "details" && selectedDeparture) {
+    return (
+      <>
+        <DepartureDetails 
+          departure={selectedDeparture} 
+          onBack={() => { setSelectedDeparture(null); setPage("departures"); }}
+        />
+        <BottomNav currentPage={page} onNavigate={handleNavigate} />
+      </>
+    );
+  }
+
+  // Main departures page
   return (
-    <main className="board">
-      <header className="board-header">
-        <h1>🚉 Abfahrten</h1>
-        <div className="status-bar">{status}</div>
-        <button className="refresh-btn" onClick={load} disabled={refreshing}>
-          {refreshing ? "⟳" : "↺ Aktualisieren"}
-        </button>
-        <button className="settings-btn" onClick={() => setPage("settings")} title="Einstellungen">⚙</button>
-      </header>
-
-      {knownNetwork && (
-        <div className="network-banner">
-          <span className="wifi-icon"><ConnectionIcon type={connType} /></span>
-          <span className="network-label">{knownNetwork.label}</span>
-          <span className="network-ssid">{knownNetwork.ssid}</span>
-        </div>
-      )}
-
-      {error && <p className="error">{error}</p>}
-
-      {manualMode && (
-        <p className="manual-notice">
-          📍 GPS nicht verfügbar – Position aus Einstellungen. <button className="link-btn" onClick={() => setPage("settings")}>Ändern ⚙</button>
-        </p>
-      )}
-
-      {displayStops.map((stop) => {
-        const deps = departures[stop.id] ?? [];
-        const isStarred = starredIds.has(stop.id);
-        const isNetworkPinned = networkPinnedIds.has(stop.id);
-        const isCollapsed = collapsedStops.has(stop.id);
-        const dist = userLocation
-          ? haversineKm(userLocation.lat, userLocation.lon, stop.latitude, stop.longitude)
-          : null;
-
-        return (
-          <section key={stop.id} className={`stop-section${isStarred ? " pinned" : ""}${isNetworkPinned ? " net-pinned" : ""}`}>
-            <h2 className="stop-name" onClick={() => toggleCollapse(stop.id)} role="button">
-              <button
-                className={`star-btn${isStarred ? " active" : ""}`}
-                onClick={(e) => { e.stopPropagation(); toggleStar(stop); }}
-                title={isStarred ? "Stern entfernen" : "Haltestelle merken"}
-              >
-                {isStarred ? "★" : "☆"}
-              </button>
-              {knownNetwork && (
-                <button
-                  className={`net-pin-btn${isNetworkPinned ? " active" : ""}`}
-                  onClick={(e) => { e.stopPropagation(); toggleNetworkPin(stop); }}
-                  title={isNetworkPinned ? "Netzwerk-Pinning entfernen" : `An ${knownNetwork.ssid} pinnen`}
-                >
-                  📶
-                </button>
-              )}
-              <span className="stop-name-text">{stop.name}</span>
-              {dist !== null && <span className="dist-badge">{formatDist(dist)}</span>}
-              <span className="collapse-icon">{isCollapsed ? "▶" : "▼"}</span>
-            </h2>
-            {!isCollapsed && (
-              deps.length === 0 ? (
-                <p className="no-deps">Keine Abfahrten</p>
+    <>
+      <main className="app">
+        {/* Header */}
+        <header className="app-header">
+          <div className="header-top">
+            <div className="logo">
+              <span className="logo-text">K2V</span>
+              <span className="logo-subtitle">CityRail</span>
+            </div>
+            <div className="header-status">
+              {knownNetwork ? (
+                <div className="connection-indicator connected">
+                  {connType === "wifi" ? <WifiIcon /> : <EthernetIcon />}
+                  <span>{knownNetwork.label}</span>
+                </div>
               ) : (
-                <table className="dep-table">
-                  <tbody>
-                    {deps.map((d, i) => (
-                      <tr key={i} className={d.delay_minutes > 0 ? "dep-row late" : "dep-row"}>
-                        <td>
-                          <span className="line-badge" style={{ background: motColor(d.mot_type) }}>
-                            {d.line}
-                          </span>
-                        </td>
-                        <td className="direction">{d.direction}</td>
-                        <td className="platform">{d.platform ? `Gl. ${d.platform}` : ""}</td>
-                        <td className="time">
-                          {d.delay_minutes !== 0 ? (
-                            <><span className="planned-time">{d.planned_time}</span>
-                              <span className="real-time">{d.real_time}</span></>
-                          ) : (
-                            <span>{d.planned_time}</span>
-                          )}
-                        </td>
-                        <td><DelayBadge delay={d.delay_minutes} /></td>
-                        <td className="countdown">
-                          {d.countdown > MAX_COUNTDOWN_DISPLAY_MIN
-                            ? <span className="time-far">{d.real_time}</span>
-                            : <>{d.countdown} min</>}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )
-            )}
-          </section>
-        );
-      })}
-    </main>
+                <div className="connection-indicator">
+                  <WifiIcon />
+                  <span>Offline</span>
+                </div>
+              )}
+              <button 
+                className={`refresh-button${refreshing ? " refreshing" : ""}`} 
+                onClick={load}
+                disabled={refreshing}
+              >
+                <RefreshIcon />
+              </button>
+            </div>
+          </div>
+          
+          {/* Search Bar */}
+          <div className="search-bar">
+            <SearchIcon className="search-icon" />
+            <input
+              type="text"
+              placeholder="Search stations..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+            />
+            <button className="filter-button">
+              <FilterIcon />
+            </button>
+          </div>
+        </header>
+
+        {/* Content */}
+        <div className="app-content">
+          {error && (
+            <div className="error-banner">
+              <span>{error}</span>
+            </div>
+          )}
+
+          {manualMode && (
+            <div className="manual-mode-banner">
+              <LocationIcon />
+              <span>Using manual location</span>
+              <button onClick={() => setPage("settings")}>Change</button>
+            </div>
+          )}
+
+          {/* Station Cards */}
+          <div className="stations-list">
+            {displayStops.map((stop) => {
+              const deps = departures[stop.id] ?? [];
+              const isStarred = starredIds.has(stop.id);
+              const isNetworkPinned = networkPinnedIds.has(stop.id);
+              const isCollapsed = collapsedStops.has(stop.id);
+              const dist = userLocation
+                ? haversineKm(userLocation.lat, userLocation.lon, stop.latitude, stop.longitude)
+                : null;
+
+              return (
+                <section key={stop.id} id={`station-${stop.id}`} className={`station-card${isStarred ? " starred" : ""}${isNetworkPinned ? " network-pinned" : ""}`}>
+                  <div className="station-header" onClick={() => toggleCollapse(stop.id)}>
+                    <button
+                      className={`star-button${isStarred ? " active" : ""}`}
+                      onClick={(e) => { e.stopPropagation(); toggleStar(stop); }}
+                    >
+                      <StarIcon filled={isStarred} />
+                    </button>
+                    {knownNetwork && (
+                      <button
+                        className={`network-pin-button${isNetworkPinned ? " active" : ""}`}
+                        onClick={(e) => { e.stopPropagation(); toggleNetworkPin(stop); }}
+                        title={isNetworkPinned ? "Remove network pin" : `Pin to ${knownNetwork.ssid}`}
+                      >
+                        <WifiIcon />
+                      </button>
+                    )}
+                    <div className="station-info">
+                      <span className="station-name">{stop.name}</span>
+                      {dist !== null && <span className="station-distance">{formatDist(dist)}</span>}
+                    </div>
+                    <button className="collapse-button">
+                      {isCollapsed ? <ChevronDownIcon /> : <ChevronUpIcon />}
+                    </button>
+                  </div>
+                  
+                  {!isCollapsed && (
+                    <div className="departures-table">
+                      {deps.length === 0 ? (
+                        <p className="no-departures">No departures</p>
+                      ) : (
+                        <>
+                          {/* Table Header */}
+                          <div className="departures-header">
+                            <span className="col-line">Line</span>
+                            <span className="col-destination">Destination</span>
+                            <span className="col-platform">Pl.</span>
+                            <span className="col-scheduled">Sched.</span>
+                            <span className="col-eta">ETA</span>
+                          </div>
+                          {/* Table Rows */}
+                          {deps.slice(0, 5).map((dep, i) => {
+                            const eta = formatCountdown(dep.countdown, dep.real_time);
+                            const isDelayed = dep.delay_minutes > 0;
+                            
+                            return (
+                              <div 
+                                key={i} 
+                                className="departure-row"
+                                onClick={() => handleDepartureClick(stop, dep)}
+                              >
+                                <span className="col-line">
+                                  <LineBadge line={dep.line} motType={dep.mot_type} />
+                                </span>
+                                <span className="col-destination">{dep.direction}</span>
+                                <span className="col-platform">{dep.platform || "-"}</span>
+                                <span className="col-scheduled">{dep.planned_time}</span>
+                                <span className={`col-eta ${isDelayed ? "delayed" : ""}`}>
+                                  {isDelayed ? `+${dep.delay_minutes} min` : eta.text}
+                                </span>
+                              </div>
+                            );
+                          })}
+                        </>
+                      )}
+                    </div>
+                  )}
+                </section>
+              );
+            })}
+          </div>
+
+          {/* Network Status Card */}
+          {knownNetwork && (
+            <div className="network-status-card">
+              <div className="network-status-header">
+                <span className="network-status-title">Network Status</span>
+                <span className="network-status-live">● Live</span>
+              </div>
+              <div className="network-status-info">
+                <span className="network-name">{knownNetwork.label}</span>
+                <span className="network-ssid">{knownNetwork.ssid}</span>
+              </div>
+              {networkStops.length > 0 && (
+                <div className="network-pinned-count">
+                  {networkStops.length} pinned station{networkStops.length !== 1 ? "s" : ""}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Proximity Map with OpenStreetMap */}
+          <div className="map-card">
+            <div className="map-header">
+              <span className="map-title">Proximity Map</span>
+              <span className="map-stop-count">
+                {mapLoading ? "Loading..." : `${mapStops.length} stops in view`}
+              </span>
+            </div>
+            <ProximityMap
+              userLocation={userLocation}
+              stops={mapStops}
+              loading={mapLoading}
+              onBoundsChange={handleMapBoundsChange}
+              onStopClick={(stop) => {
+                // Check if stop is in display list, if so scroll to it
+                const element = document.getElementById(`station-${stop.id}`);
+                if (element) {
+                  element.scrollIntoView({ behavior: "smooth", block: "center" });
+                }
+              }}
+            />
+          </div>
+        </div>
+      </main>
+      <BottomNav currentPage={page} onNavigate={handleNavigate} />
+    </>
   );
 }
 
