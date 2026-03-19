@@ -2,6 +2,16 @@ import { useState, useCallback, useRef, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Stop, ManualCoords, saveStarred, saveManualCoords } from "./storage";
 import { ConnectionInfo } from "./types";
+import { 
+  WifiIcon, 
+  EthernetIcon, 
+  SearchIcon, 
+  RefreshIcon, 
+  CloseIcon, 
+  PlusIcon,
+  LocationIcon,
+  StarIcon,
+} from "./components/Icons";
 import "./Settings.css";
 
 interface Network {
@@ -14,10 +24,9 @@ interface Props {
   manualCoords: ManualCoords;
   onStarredChange: (stops: Stop[]) => void;
   onCoordsChange: (coords: ManualCoords) => void;
-  onBack: () => void;
 }
 
-export default function Settings({ starred, manualCoords, onStarredChange, onCoordsChange, onBack }: Props) {
+export default function Settings({ starred, manualCoords, onStarredChange, onCoordsChange }: Props) {
   const [lat, setLat] = useState(String(manualCoords.lat));
   const [lon, setLon] = useState(String(manualCoords.lon));
   const [coordsSaved, setCoordsSaved] = useState(false);
@@ -136,158 +145,227 @@ export default function Settings({ starred, manualCoords, onStarredChange, onCoo
   const starredIds = new Set(starred.map((s) => s.id));
 
   return (
-    <main className="settings">
-      <header className="settings-header">
-        <button className="back-btn" onClick={onBack}>← Zurück</button>
-        <h1>Einstellungen</h1>
+    <main className="config-page">
+      {/* Header */}
+      <header className="config-header">
+        <div className="config-header-top">
+          <h1>System Configuration</h1>
+        </div>
       </header>
 
-      {/* ── Manual coordinates ── */}
-      <section className="settings-section">
-        <h2>📍 Manuelle Koordinaten</h2>
-        <p className="settings-hint">
-          Wird verwendet, wenn GPS nicht verfügbar oder verweigert ist.
-        </p>
-        <div className="coords-row">
-          <label>
-            Breitengrad (Lat)
-            <input
-              type="number"
-              step="any"
-              value={lat}
-              onChange={(e) => { setLat(e.currentTarget.value); setCoordsSaved(false); }}
-              placeholder="49.0090"
-            />
-          </label>
-          <label>
-            Längengrad (Lon)
-            <input
-              type="number"
-              step="any"
-              value={lon}
-              onChange={(e) => { setLon(e.currentTarget.value); setCoordsSaved(false); }}
-              placeholder="8.4040"
-            />
-          </label>
-          <button className="save-btn" onClick={saveCoords}>
-            {coordsSaved ? "✓ Gespeichert" : "Speichern"}
+      <div className="config-content">
+        {/* Manual Coordinates Section */}
+        <section className="config-section">
+          <div className="section-header">
+            <LocationIcon className="section-icon" />
+            <h2>Manual Coordinates</h2>
+          </div>
+          <p className="section-hint">
+            Used when GPS is unavailable or denied.
+          </p>
+          
+          <div className="coords-form">
+            <div className="coord-input-group">
+              <label>Latitude</label>
+              <input
+                type="number"
+                step="any"
+                value={lat}
+                onChange={(e) => { setLat(e.currentTarget.value); setCoordsSaved(false); }}
+                placeholder="49.0090"
+              />
+            </div>
+            <div className="coord-input-group">
+              <label>Longitude</label>
+              <input
+                type="number"
+                step="any"
+                value={lon}
+                onChange={(e) => { setLon(e.currentTarget.value); setCoordsSaved(false); }}
+                placeholder="8.4040"
+              />
+            </div>
+          </div>
+          <button className={`primary-button${coordsSaved ? " success" : ""}`} onClick={saveCoords}>
+            {coordsSaved ? "✓ Saved" : "Update Location"}
           </button>
-        </div>
-      </section>
+        </section>
 
-      {/* ── Starred stops ── */}
-      <section className="settings-section">
-        <h2>★ Gemerkte Haltestellen</h2>
+        {/* Saved Terminals Section */}
+        <section className="config-section">
+          <div className="section-header">
+            <StarIcon filled className="section-icon starred-icon" />
+            <h2>Saved Terminals</h2>
+            {starred.length > 0 && (
+              <span className="section-count">{starred.length} active</span>
+            )}
+          </div>
 
-        {starred.length === 0 ? (
-          <p className="settings-hint">Keine gemerkten Haltestellen.</p>
-        ) : (
-          <ul className="starred-list">
-            {starred.map((s) => (
-              <li key={s.id} className="starred-item">
-                <span className="starred-name">{s.name}</span>
-                <span className="starred-coords">{s.latitude.toFixed(4)}, {s.longitude.toFixed(4)}</span>
-                <button className="remove-btn" onClick={() => removeStarred(s.id)} title="Entfernen">✕</button>
-              </li>
-            ))}
-          </ul>
-        )}
-
-        {/* Search to add */}
-        <div className="search-box">
-          <input
-            type="text"
-            className="search-input"
-            placeholder="Haltestelle suchen…"
-            value={query}
-            onChange={(e) => handleQueryChange(e.currentTarget.value)}
-          />
-          {searching && <span className="search-spinner">⟳</span>}
-        </div>
-        {searchError && <p className="settings-error">{searchError}</p>}
-        {searchResults.length > 0 && (
-          <ul className="search-results">
-            {searchResults.map((s) => (
-              <li key={s.id} className="search-result-item">
-                <span className="result-name">{s.name}</span>
-                <button
-                  className={`add-btn${starredIds.has(s.id) ? " added" : ""}`}
-                  onClick={() => addStarred(s)}
-                  disabled={starredIds.has(s.id)}
-                >
-                  {starredIds.has(s.id) ? "★ Gemerkt" : "☆ Merken"}
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
-      {/* ── Known networks ── */}
-      <section className="settings-section">
-        <h2>
-          <svg className="section-wifi-icon" width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
-            <path d="M1.5 8.5a16.5 16.5 0 0 1 21 0M5 12.5a12 12 0 0 1 14 0M8.5 16.5a7.5 7.5 0 0 1 7 0M12 21h.01"/>
-          </svg>
-          Bekannte Netzwerke
-        </h2>
-        <p className="settings-hint">
-          Wenn du mit einem dieser Netzwerke (WLAN oder Kabel) verbunden bist, wird oben ein Indikator angezeigt.
-        </p>
-
-        <div className="current-ssid-bar">
-          {currentConn === "loading" ? (
-            <span className="ssid-detecting">⟳ Verbindung wird erkannt…</span>
-          ) : currentConn ? (
-            <>
-              <span className={`conn-type-badge conn-${currentConn.conn_type}`}>
-                {currentConn.conn_type === "wifi" ? "📶 WLAN" : "🔌 Kabel"}
-              </span>
-              <span><strong>{currentConn.name}</strong></span>
-              {networks.some((n) => n.ssid === currentConn.name)
-                ? <span className="ssid-saved">✓ Bereits gespeichert</span>
-                : <button className="save-btn" onClick={addCurrentNetwork} disabled={netSaving}>
-                    {netSaving ? "…" : "⚡ Jetzt merken"}
+          {/* Search to add */}
+          <div className="terminal-search">
+            <SearchIcon className="search-icon" />
+            <input
+              type="text"
+              placeholder="Search stations..."
+              value={query}
+              onChange={(e) => handleQueryChange(e.currentTarget.value)}
+            />
+            {searching && <RefreshIcon className="search-spinner" />}
+          </div>
+          
+          {searchError && <p className="config-error">{searchError}</p>}
+          
+          {searchResults.length > 0 && (
+            <ul className="search-results-list">
+              {searchResults.map((s) => (
+                <li key={s.id} className="search-result-item">
+                  <span className="result-name">{s.name}</span>
+                  <button
+                    className={`add-button${starredIds.has(s.id) ? " added" : ""}`}
+                    onClick={() => addStarred(s)}
+                    disabled={starredIds.has(s.id)}
+                  >
+                    {starredIds.has(s.id) ? (
+                      <>
+                        <StarIcon filled />
+                        <span>Saved</span>
+                      </>
+                    ) : (
+                      <>
+                        <PlusIcon />
+                        <span>Add</span>
+                      </>
+                    )}
                   </button>
-              }
-            </>
-          ) : (
-            <span className="ssid-none">Keine Verbindung erkannt</span>
+                </li>
+              ))}
+            </ul>
           )}
-          <button className="icon-btn" onClick={detectConn} title="Erneut erkennen">↺</button>
-        </div>
 
-        {networks.length > 0 && (
-          <ul className="network-list">
-            {networks.map((n) => (
-              <li key={n.ssid} className={`network-item${n.ssid === currentName ? " active-net" : ""}`}>
-                <div className="network-item-info">
-                  <span className="network-item-label">{n.label}</span>
-                  <span className="network-item-ssid">{n.ssid}</span>
+          {starred.length === 0 ? (
+            <p className="empty-state">No saved terminals yet. Search above to add some.</p>
+          ) : (
+            <ul className="terminals-list">
+              {starred.map((s) => (
+                <li key={s.id} className="terminal-item">
+                  <div className="terminal-info">
+                    <span className="terminal-name">{s.name}</span>
+                    <span className="terminal-coords">{s.latitude.toFixed(4)}, {s.longitude.toFixed(4)}</span>
+                  </div>
+                  <button className="remove-button" onClick={() => removeStarred(s.id)} title="Remove">
+                    <CloseIcon />
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+
+        {/* Known Networks Section */}
+        <section className="config-section">
+          <div className="section-header">
+            <WifiIcon className="section-icon" />
+            <h2>Known Networks</h2>
+          </div>
+          <p className="section-hint">
+            When connected to one of these networks, a status indicator will appear.
+          </p>
+
+          {/* Current Connection */}
+          <div className="current-connection">
+            {currentConn === "loading" ? (
+              <div className="connection-status detecting">
+                <RefreshIcon className="spin" />
+                <span>Detecting connection...</span>
+              </div>
+            ) : currentConn ? (
+              <div className="connection-status connected">
+                <div className="connection-badge">
+                  {currentConn.conn_type === "wifi" ? <WifiIcon /> : <EthernetIcon />}
+                  <span>{currentConn.conn_type === "wifi" ? "WiFi" : "Ethernet"}</span>
                 </div>
-                <button className="remove-btn" onClick={() => removeNetwork(n.ssid)} title="Entfernen">✕</button>
-              </li>
-            ))}
-          </ul>
-        )}
+                <span className="connection-name">{currentConn.name}</span>
+                {networks.some((n) => n.ssid === currentConn.name) ? (
+                  <span className="connection-saved">✓ Registered</span>
+                ) : (
+                  <button className="register-button" onClick={addCurrentNetwork} disabled={netSaving}>
+                    {netSaving ? "..." : "Register"}
+                  </button>
+                )}
+                <button className="refresh-connection" onClick={detectConn}>
+                  <RefreshIcon />
+                </button>
+              </div>
+            ) : (
+              <div className="connection-status offline">
+                <WifiIcon />
+                <span>No connection detected</span>
+                <button className="refresh-connection" onClick={detectConn}>
+                  <RefreshIcon />
+                </button>
+              </div>
+            )}
+          </div>
 
-        <div className="network-add-row">
-          <input
-            className="search-input"
-            placeholder="SSID (Netzwerkname)"
-            value={newSsid}
-            onChange={(e) => setNewSsid(e.currentTarget.value)}
-          />
-          <input
-            className="search-input"
-            placeholder="Bezeichnung (optional)"
-            value={newLabel}
-            onChange={(e) => setNewLabel(e.currentTarget.value)}
-          />
-          <button className="save-btn" onClick={addNetwork} disabled={netSaving || !newSsid.trim()}>
-            {netSaving ? "…" : "+ Hinzufügen"}
+          {/* Registered Networks List */}
+          {networks.length > 0 && (
+            <ul className="networks-list">
+              {networks.map((n) => (
+                <li key={n.ssid} className={`network-item${n.ssid === currentName ? " active" : ""}`}>
+                  <div className="network-info">
+                    <WifiIcon className="network-icon" />
+                    <div className="network-details">
+                      <span className="network-label">{n.label}</span>
+                      <span className="network-ssid">{n.ssid}</span>
+                    </div>
+                  </div>
+                  {n.ssid === currentName && (
+                    <span className="network-active-badge">Connected</span>
+                  )}
+                  <button className="remove-button" onClick={() => removeNetwork(n.ssid)} title="Remove">
+                    <CloseIcon />
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+
+          {/* Add Network Form */}
+          <div className="add-network-form">
+            <h3>Register New Node</h3>
+            <div className="network-inputs">
+              <input
+                type="text"
+                placeholder="Network SSID"
+                value={newSsid}
+                onChange={(e) => setNewSsid(e.currentTarget.value)}
+              />
+              <input
+                type="text"
+                placeholder="Label (optional)"
+                value={newLabel}
+                onChange={(e) => setNewLabel(e.currentTarget.value)}
+              />
+            </div>
+            <button 
+              className="primary-button" 
+              onClick={addNetwork} 
+              disabled={netSaving || !newSsid.trim()}
+            >
+              <PlusIcon />
+              <span>Add Network</span>
+            </button>
+          </div>
+        </section>
+
+        {/* Factory Reset */}
+        <section className="config-section danger-section">
+          <button className="danger-button">
+            Factory Reset
           </button>
-        </div>
-      </section>
+          <p className="danger-hint">This will clear all saved data and settings.</p>
+        </section>
+      </div>
     </main>
   );
 }
