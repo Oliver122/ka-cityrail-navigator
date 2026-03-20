@@ -64,7 +64,7 @@
   flex-direction: column;
   min-height: 100vh;
   background: var(--surface);
-  padding-bottom: 5rem;
+  padding-bottom: calc(5rem + env(safe-area-inset-bottom, 0px));
 }
 
 /* ── Header ─────────────────────────────────────────────────────────────────── */
@@ -645,4 +645,59 @@ button {
   .departure-row {
     padding: 0.625rem 1rem;
   }
+}
+
+/* ── Loading Screen ────────────────────────────────────────────────────────── */
+
+.loading-screen {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  min-height: calc(100vh - 5rem);
+  gap: 1.5rem;
+  padding: 2rem;
+}
+
+.loading-logo {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.loading-logo .logo-text {
+  font-size: 3rem;
+  font-weight: 800;
+  color: var(--primary);
+  letter-spacing: -0.03em;
+}
+
+.loading-logo .logo-subtitle {
+  font-size: 1.25rem;
+  font-weight: 500;
+  color: var(--on-surface-variant);
+  letter-spacing: 0.02em;
+}
+
+.loading-spinner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  color: var(--primary);
+  animation: spin 1s linear infinite;
+}
+
+.loading-spinner svg {
+  width: 32px;
+  height: 32px;
+}
+
+.loading-text {
+  font-size: 0.95rem;
+  color: var(--on-surface-muted);
+  text-align: center;
 }

@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useRef } from "react";
+import { useEffect, useState, useCallback, useRef, TouchEvent } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentPosition, requestPermissions } from "@tauri-apps/plugin-geolocation";
 import { Stop, ManualCoords, loadStarred, saveStarred, loadManualCoords } from "./storage";
@@ -22,6 +22,9 @@ import "./components/ProximityMap.css";
 import Settings from "./Settings";
 import DepartureDetails from "./DepartureDetails";
 import "./App.css";
+
+// Page order for swipe navigation
+const PAGE_ORDER: AppPage[] = ["departures", "settings"];
 
 interface NetworkInfo {
   ssid: string;
@@ -94,9 +97,40 @@ function App() {
   const [refreshing, setRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedDeparture, setSelectedDeparture] = useState<DepartureDetail | null>(null);
+  const [initialLoading, setInitialLoading] = useState(true);
   
   // Track last fetched bounds to avoid duplicate requests
   const lastBoundsRef = useRef<string>("");
+  
+  // Swipe gesture handling
+  const touchStartRef = useRef<{ x: number; y: number } | null>(null);
+  const SWIPE_THRESHOLD = 80;
+  
+  const handleTouchStart = useCallback((e: TouchEvent) => {
+    touchStartRef.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+  }, []);
+  
+  const handleTouchEnd = useCallback((e: TouchEvent) => {
+    if (!touchStartRef.current) return;
+    const deltaX = e.changedTouches[0].clientX - touchStartRef.current.x;
+    const deltaY = e.changedTouches[0].clientY - touchStartRef.current.y;
+    touchStartRef.current = null;
+    
+    // Only trigger if horizontal swipe is dominant
+    if (Math.abs(deltaX) < SWIPE_THRESHOLD || Math.abs(deltaY) > Math.abs(deltaX)) return;
+    
+    // Skip swipe navigation on details page (use back button instead)
+    if (page === "details") return;
+    
+    const currentIndex = PAGE_ORDER.indexOf(page);
+    if (deltaX < 0 && currentIndex < PAGE_ORDER.length - 1) {
+      // Swipe left -> next page
+      setPage(PAGE_ORDER[currentIndex + 1]);
+    } else if (deltaX > 0 && currentIndex > 0) {
+      // Swipe right -> previous page
+      setPage(PAGE_ORDER[currentIndex - 1]);
+    }
+  }, [page]);
 
   // Fetch stops within map bounds
   const handleMapBoundsChange = useCallback(async (bounds: MapBounds) => {
@@ -178,6 +212,7 @@ function App() {
           setManualMode(true);
           await loadFrom(saved.lat, saved.lon);
           setRefreshing(false);
+          setInitialLoading(false);
           return;
         }
         const pos = await getCurrentPosition({ enableHighAccuracy: true, timeout: 10000, maximumAge: 30000 });
@@ -190,6 +225,7 @@ function App() {
         await loadFrom(saved.lat, saved.lon);
       } finally {
         setRefreshing(false);
+        setInitialLoading(false);
       }
     })();
   }, [loadFrom]);
@@ -309,7 +345,7 @@ function App() {
   // Settings page
   if (page === "settings") {
     return (
-      <>
+      <div onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd}>
         <Settings
           starred={starredStops}
           manualCoords={manualCoords}
@@ -317,7 +353,7 @@ function App() {
           onCoordsChange={handleCoordsChange}
         />
         <BottomNav currentPage={page} onNavigate={handleNavigate} />
-      </>
+      </div>
     );
   }
 
@@ -334,9 +370,28 @@ function App() {
     );
   }
 
+  // Initial loading screen
+  if (initialLoading) {
+    return (
+      <main className="app">
+        <div className="loading-screen">
+          <div className="loading-logo">
+            <span className="logo-text">K2V</span>
+            <span className="logo-subtitle">CityRail</span>
+          </div>
+          <div className="loading-spinner">
+            <RefreshIcon />
+          </div>
+          <p className="loading-text">Loading nearby stations...</p>
+        </div>
+        <BottomNav currentPage={page} onNavigate={handleNavigate} />
+      </main>
+    );
+  }
+
   // Main departures page
   return (
-    <>
+    <div onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd}>
       <main className="app">
         {/* Header */}
         <header className="app-header">
@@ -526,7 +581,7 @@ function App() {
         </div>
       </main>
       <BottomNav currentPage={page} onNavigate={handleNavigate} />
-    </>
+    </div>
   );
 }
 
