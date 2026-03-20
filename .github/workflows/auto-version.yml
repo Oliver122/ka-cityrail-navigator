@@ -1,0 +1,115 @@
+name: Auto Version & Tag
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Get latest tag
+        id: get_tag
+        run: |
+          git fetch --tags
+          LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
+          echo "latest=$LATEST_TAG" >> $GITHUB_OUTPUT
+          echo "Latest tag: $LATEST_TAG"
+
+      - name: Determine version bump
+        id: bump
+        run: |
+          LATEST="${{ steps.get_tag.outputs.latest }}"
+          # Remove 'v' prefix
+          VERSION="${LATEST#v}"
+          
+          # Parse version components
+          MAJOR=$(echo $VERSION | cut -d. -f1)
+          MINOR=$(echo $VERSION | cut -d. -f2)
+          PATCH=$(echo $VERSION | cut -d. -f3)
+          
+          # Get merged PR info from commit message or branch name
+          COMMIT_MSG=$(git log -1 --pretty=%B)
+          BRANCH_NAME=$(git log -1 --pretty=%s | grep -oP '(?<=Merge pull request #\d+ from [^/]+/)[\w-]+' || echo "")
+          
+          echo "Commit message: $COMMIT_MSG"
+          echo "Branch name: $BRANCH_NAME"
+          
+          # Determine bump type based on branch naming convention
+          if [[ "$BRANCH_NAME" =~ ^bc/ ]] || [[ "$BRANCH_NAME" =~ ^breaking-change/ ]] || [[ "$COMMIT_MSG" =~ "[breaking]" ]]; then
+            # Major bump: 1.0.0
+            MAJOR=$((MAJOR + 1))
+            MINOR=0
+            PATCH=0
+            BUMP_TYPE="major"
+          elif [[ "$BRANCH_NAME" =~ ^feat/ ]] || [[ "$COMMIT_MSG" =~ "[feat]" ]]; then
+            # Minor bump: 0.1.0
+            MINOR=$((MINOR + 1))
+            PATCH=0
+            BUMP_TYPE="minor"
+          elif [[ "$BRANCH_NAME" =~ ^fix/ ]] || [[ "$COMMIT_MSG" =~ "[fix]" ]]; then
+            # Patch bump: 0.0.1
+            PATCH=$((PATCH + 1))
+            BUMP_TYPE="patch"
+          else
+            # Default to patch for any other changes
+            PATCH=$((PATCH + 1))
+            BUMP_TYPE="patch"
+          fi
+          
+          NEW_VERSION="v${MAJOR}.${MINOR}.${PATCH}"
+          echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
+          echo "bump_type=$BUMP_TYPE" >> $GITHUB_OUTPUT
+          echo "New version: $NEW_VERSION ($BUMP_TYPE)"
+
+      - name: Update version in package.json
+        run: |
+          VERSION="${{ steps.bump.outputs.new_version }}"
+          VERSION="${VERSION#v}"
+          npm version $VERSION --no-git-tag-version
+
+      - name: Update version in tauri.conf.json
+        run: |
+          VERSION="${{ steps.bump.outputs.new_version }}"
+          VERSION="${VERSION#v}"
+          sed -i "s/\"version\": \"[^\"]*\"/\"version\": \"$VERSION\"/" src-tauri/tauri.conf.json
+
+      - name: Update version in Cargo.toml
+        run: |
+          VERSION="${{ steps.bump.outputs.new_version }}"
+          VERSION="${VERSION#v}"
+          sed -i "0,/^version = /s/^version = \"[^\"]*\"/version = \"$VERSION\"/" src-tauri/Cargo.toml
+
+      - name: Commit version bump
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add package.json package-lock.json src-tauri/tauri.conf.json src-tauri/Cargo.toml
+          git commit -m "chore: bump version to ${{ steps.bump.outputs.new_version }}" || echo "No changes to commit"
+          git push
+
+      - name: Create and push tag
+        run: |
+          git tag ${{ steps.bump.outputs.new_version }}
+          git push origin ${{ steps.bump.outputs.new_version }}
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ steps.bump.outputs.new_version }}
+          name: Release ${{ steps.bump.outputs.new_version }}
+          generate_release_notes: true
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

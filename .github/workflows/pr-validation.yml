@@ -1,0 +1,57 @@
+name: PR Validation
+
+on:
+  pull_request:
+    branches: [development, main]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Setup Rust
+        uses: dtolnay/rust-action@stable
+        with:
+          targets: aarch64-linux-android
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Setup Android NDK
+        uses: nttld/setup-ndk@v1
+        id: setup-ndk
+        with:
+          ndk-version: r26b
+          add-to-path: true
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Tauri CLI
+        run: cargo install tauri-cli --version "^2.0.0"
+
+      - name: Build frontend
+        run: npm run build
+
+      - name: Build Android APK (validation)
+        run: cargo tauri android build --apk --target aarch64
+        env:
+          NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
