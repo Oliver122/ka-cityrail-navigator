@@ -53,16 +53,24 @@ jobs:
       - name: Build frontend
         run: npm run build
 
+      # PR build (validation only - debug signed)
+      - name: Build Android APK (PR Validation)
+        if: github.event_name == 'pull_request'
+        run: |
+          cargo tauri android build --apk
+        env:
+          NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
+
       # Development build (debug signed)
       - name: Build Android APK (Development)
-        if: github.ref == 'refs/heads/development'
+        if: github.ref == 'refs/heads/development' && github.event_name == 'push'
         run: |
           cargo tauri android build --apk
         env:
           NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
 
       - name: Upload Development APK
-        if: github.ref == 'refs/heads/development'
+        if: github.ref == 'refs/heads/development' && github.event_name == 'push'
         uses: actions/upload-artifact@v4
         with:
           name: app-dev-debug
@@ -71,12 +79,12 @@ jobs:
 
       # Production build (release signed for Play Store)
       - name: Decode Keystore
-        if: github.ref == 'refs/heads/main'
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
         run: |
           echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > src-tauri/gen/android/release.keystore
 
       - name: Build Android AAB (Production)
-        if: github.ref == 'refs/heads/main'
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
         run: |
           cargo tauri android build --aab
         env:
@@ -87,7 +95,7 @@ jobs:
           TAURI_SIGNING_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
 
       - name: Upload Production AAB
-        if: github.ref == 'refs/heads/main'
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
         uses: actions/upload-artifact@v4
         with:
           name: app-release-aab
@@ -96,7 +104,7 @@ jobs:
 
       # Also build signed APK for direct distribution
       - name: Build Android APK (Production)
-        if: github.ref == 'refs/heads/main'
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
         run: |
           cargo tauri android build --apk
         env:
@@ -107,7 +115,7 @@ jobs:
           TAURI_SIGNING_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
 
       - name: Upload Production APK
-        if: github.ref == 'refs/heads/main'
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
         uses: actions/upload-artifact@v4
         with:
           name: app-release-apk
@@ -115,5 +123,5 @@ jobs:
           retention-days: 30
 
       - name: Cleanup keystore
-        if: always() && github.ref == 'refs/heads/main'
+        if: always() && github.ref == 'refs/heads/main' && github.event_name == 'push'
         run: rm -f src-tauri/gen/android/release.keystore
