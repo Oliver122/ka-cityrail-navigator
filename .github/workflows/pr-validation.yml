@@ -51,6 +51,9 @@ jobs:
       - name: Build frontend
         run: npm run build
 
+      - name: Initialize Android project
+        run: cargo tauri android init
+
       - name: Build Android APK (validation)
         run: cargo tauri android build --apk --target aarch64
         env:

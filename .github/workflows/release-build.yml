@@ -51,6 +51,9 @@ jobs:
       - name: Build frontend
         run: npm run build
 
+      - name: Initialize Android project
+        run: cargo tauri android init
+
       - name: Decode Keystore
         run: |
           echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > src-tauri/gen/android/release.keystore
