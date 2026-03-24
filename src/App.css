@@ -430,6 +430,13 @@
   text-align: right;
 }
 
+/* Scrollable rows wrapper */
+.departures-rows-wrapper {
+  max-height: 220px;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
 /* Table Data Rows */
 .departure-row {
   display: grid;
