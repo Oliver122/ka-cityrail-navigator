@@ -15,6 +15,7 @@
 .config-header {
   background: #08080f;
   padding: 1.5rem 1rem;
+  padding-top: calc(1.5rem + env(safe-area-inset-top, 0px));
   position: sticky;
   top: 0;
   z-index: 10;

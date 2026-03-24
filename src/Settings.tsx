@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { Stop, ManualCoords, saveStarred, saveManualCoords } from "./storage";
+import { Stop, ManualCoords, DisplaySettings, saveStarred, saveManualCoords, saveDisplaySettings } from "./storage";
 import { ConnectionInfo } from "./types";
 import { 
   WifiIcon, 
@@ -11,6 +11,7 @@ import {
   PlusIcon,
   LocationIcon,
   StarIcon,
+  SettingsIcon,
 } from "./components/Icons";
 import "./Settings.css";
 
@@ -22,14 +23,21 @@ interface Network {
 interface Props {
   starred: Stop[];
   manualCoords: ManualCoords;
+  displaySettings: DisplaySettings;
   onStarredChange: (stops: Stop[]) => void;
   onCoordsChange: (coords: ManualCoords) => void;
+  onDisplaySettingsChange: (settings: DisplaySettings) => void;
 }
 
-export default function Settings({ starred, manualCoords, onStarredChange, onCoordsChange }: Props) {
+export default function Settings({ starred, manualCoords, displaySettings, onStarredChange, onCoordsChange, onDisplaySettingsChange }: Props) {
   const [lat, setLat] = useState(String(manualCoords.lat));
   const [lon, setLon] = useState(String(manualCoords.lon));
   const [coordsSaved, setCoordsSaved] = useState(false);
+
+  // Display settings state
+  const [nearbyLimit, setNearbyLimit] = useState(displaySettings.nearbyStopsLimit);
+  const [timeWindow, setTimeWindow] = useState(displaySettings.timeWindowMinutes);
+  const [displaySaved, setDisplaySaved] = useState(false);
 
   // Networks state
   const [networks, setNetworks] = useState<Network[]>([]);
@@ -97,6 +105,14 @@ export default function Settings({ starred, manualCoords, onStarredChange, onCoo
     onCoordsChange(coords);
     setCoordsSaved(true);
     setTimeout(() => setCoordsSaved(false), 2000);
+  };
+
+  const saveDisplay = () => {
+    const settings: DisplaySettings = { nearbyStopsLimit: nearbyLimit, timeWindowMinutes: timeWindow };
+    saveDisplaySettings(settings);
+    onDisplaySettingsChange(settings);
+    setDisplaySaved(true);
+    setTimeout(() => setDisplaySaved(false), 2000);
   };
 
   const removeStarred = (id: string) => {
@@ -188,6 +204,43 @@ export default function Settings({ starred, manualCoords, onStarredChange, onCoo
           </div>
           <button className={`primary-button${coordsSaved ? " success" : ""}`} onClick={saveCoords}>
             {coordsSaved ? "✓ Saved" : "Update Location"}
+          </button>
+        </section>
+
+        {/* Display Settings Section */}
+        <section className="config-section">
+          <div className="section-header">
+            <SettingsIcon className="section-icon" />
+            <h2>Display Settings</h2>
+          </div>
+          <p className="section-hint">
+            Control how many stops and departures are shown.
+          </p>
+          
+          <div className="coords-form">
+            <div className="coord-input-group">
+              <label>Nearby Stops</label>
+              <input
+                type="number"
+                min="1"
+                max="20"
+                value={nearbyLimit}
+                onChange={(e) => { setNearbyLimit(Math.max(1, Math.min(20, parseInt(e.currentTarget.value) || 1))); setDisplaySaved(false); }}
+              />
+            </div>
+            <div className="coord-input-group">
+              <label>Time Window (min)</label>
+              <input
+                type="number"
+                min="15"
+                max="180"
+                value={timeWindow}
+                onChange={(e) => { setTimeWindow(Math.max(15, Math.min(180, parseInt(e.currentTarget.value) || 60))); setDisplaySaved(false); }}
+              />
+            </div>
+          </div>
+          <button className={`primary-button${displaySaved ? " success" : ""}`} onClick={saveDisplay}>
+            {displaySaved ? "✓ Saved" : "Update Settings"}
           </button>
         </section>
 

@@ -10,8 +10,19 @@ export interface ManualCoords {
   lon: number;
 }
 
+export interface DisplaySettings {
+  nearbyStopsLimit: number;
+  timeWindowMinutes: number;
+}
+
 const STARRED_KEY = "ka_starred_stops";
 const COORDS_KEY  = "ka_manual_coords";
+const DISPLAY_KEY = "ka_display_settings";
+
+const DEFAULT_DISPLAY: DisplaySettings = {
+  nearbyStopsLimit: 8,
+  timeWindowMinutes: 60,
+};
 
 export function loadStarred(): Stop[] {
   try { return JSON.parse(localStorage.getItem(STARRED_KEY) ?? "[]"); }
@@ -32,4 +43,16 @@ export function loadManualCoords(): ManualCoords {
 
 export function saveManualCoords(coords: ManualCoords): void {
   localStorage.setItem(COORDS_KEY, JSON.stringify(coords));
+}
+
+export function loadDisplaySettings(): DisplaySettings {
+  try {
+    const raw = localStorage.getItem(DISPLAY_KEY);
+    if (raw) return { ...DEFAULT_DISPLAY, ...JSON.parse(raw) };
+  } catch { /* ignore */ }
+  return DEFAULT_DISPLAY;
+}
+
+export function saveDisplaySettings(settings: DisplaySettings): void {
+  localStorage.setItem(DISPLAY_KEY, JSON.stringify(settings));
 }
