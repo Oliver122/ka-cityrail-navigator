@@ -1,0 +1,99 @@
+name: Dev Build
+
+on:
+  push:
+    branches: [main]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build-dev:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get version info
+        id: version
+        run: |
+          git fetch --tags
+          LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
+          SHORT_SHA=$(git rev-parse --short HEAD)
+          echo "tag=$LATEST_TAG" >> $GITHUB_OUTPUT
+          echo "sha=$SHORT_SHA" >> $GITHUB_OUTPUT
+          echo "Version: $LATEST_TAG-dev+$SHORT_SHA"
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android,i686-linux-android
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Setup Android NDK
+        uses: nttld/setup-ndk@v1
+        id: setup-ndk
+        with:
+          ndk-version: r26b
+          add-to-path: true
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Tauri CLI
+        run: cargo install tauri-cli --version "^2.0.0"
+
+      - name: Build frontend
+        run: npm run build
+
+      - name: Initialize Android project
+        run: cargo tauri android init
+
+      - name: Build Android APK (Debug)
+        run: cargo tauri android build --apk --debug
+        env:
+          NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
+
+      - name: Rename artifacts
+        run: |
+          VERSION="${{ steps.version.outputs.tag }}"
+          SHA="${{ steps.version.outputs.sha }}"
+          mkdir -p dev-artifacts
+          cp src-tauri/gen/android/app/build/outputs/apk/universal/debug/*.apk dev-artifacts/ka-cityrail-navigator-${VERSION}-dev-${SHA}.apk
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dev-build-${{ steps.version.outputs.sha }}
+          path: dev-artifacts/*.apk
+          retention-days: 30
+
+      - name: Wait for release to be created
+        run: sleep 30
+
+      - name: Upload to latest release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          files: dev-artifacts/*.apk
+          fail_on_unmatched_files: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        continue-on-error: true
