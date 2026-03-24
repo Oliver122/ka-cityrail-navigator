@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback, useRef, TouchEvent } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentPosition, requestPermissions } from "@tauri-apps/plugin-geolocation";
-import { Stop, ManualCoords, loadStarred, saveStarred, loadManualCoords } from "./storage";
+import { Stop, ManualCoords, DisplaySettings, loadStarred, saveStarred, loadManualCoords, loadDisplaySettings } from "./storage";
 import { ConnectionInfo, AppPage, DepartureDetail, RouteStop } from "./types";
 import { 
   BottomNav, 
@@ -90,6 +90,7 @@ function App() {
   const [mapLoading, setMapLoading] = useState(false);
   const [starredStops, setStarredStops] = useState<Stop[]>(loadStarred);
   const [manualCoords, setManualCoords] = useState<ManualCoords>(loadManualCoords);
+  const [displaySettings, setDisplaySettings] = useState<DisplaySettings>(loadDisplaySettings);
   const [departures, setDepartures] = useState<Record<string, Departure[]>>({});
   const [userLocation, setUserLocation] = useState<{ lat: number; lon: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -174,12 +175,17 @@ function App() {
     setManualCoords(coords);
   }, []);
 
+  const handleDisplaySettingsChange = useCallback((settings: DisplaySettings) => {
+    setDisplaySettings(settings);
+  }, []);
+
   const loadFrom = useCallback(async (latitude: number, longitude: number) => {
     setUserLocation({ lat: latitude, lon: longitude });
     setError(null);
     try {
+      const settings = loadDisplaySettings();
       const nearby = await invoke<Stop[]>("fetch_stops_near", {
-        latitude, longitude, radiusKm: 1.5, limit: 8,
+        latitude, longitude, radiusKm: 1.5, limit: settings.nearbyStopsLimit,
       });
       setNearbyStops(nearby);
 
@@ -190,7 +196,7 @@ function App() {
 
       const results = await Promise.all(
         all.map((s) =>
-          invoke<Departure[]>("fetch_departures", { stopId: s.id })
+          invoke<Departure[]>("fetch_departures", { stopId: s.id, timeWindowMinutes: settings.timeWindowMinutes })
             .then((deps) => [s.id, deps] as [string, Departure[]])
             .catch(() => [s.id, []] as [string, Departure[]])
         )
@@ -349,8 +355,10 @@ function App() {
         <Settings
           starred={starredStops}
           manualCoords={manualCoords}
+          displaySettings={displaySettings}
           onStarredChange={handleStarredChange}
           onCoordsChange={handleCoordsChange}
+          onDisplaySettingsChange={handleDisplaySettingsChange}
         />
         <BottomNav currentPage={page} onNavigate={handleNavigate} />
       </div>
@@ -505,29 +513,31 @@ function App() {
                             <span className="col-scheduled">Sched.</span>
                             <span className="col-eta">ETA</span>
                           </div>
-                          {/* Table Rows */}
-                          {deps.slice(0, 5).map((dep, i) => {
-                            const eta = formatCountdown(dep.countdown, dep.real_time);
-                            const isDelayed = dep.delay_minutes > 0;
-                            
-                            return (
-                              <div 
-                                key={i} 
-                                className="departure-row"
-                                onClick={() => handleDepartureClick(stop, dep)}
-                              >
-                                <span className="col-line">
-                                  <LineBadge line={dep.line} motType={dep.mot_type} />
-                                </span>
-                                <span className="col-destination">{dep.direction}</span>
-                                <span className="col-platform">{dep.platform || "-"}</span>
-                                <span className="col-scheduled">{dep.planned_time}</span>
-                                <span className={`col-eta ${isDelayed ? "delayed" : ""}`}>
-                                  {isDelayed ? `+${dep.delay_minutes} min` : eta.text}
-                                </span>
-                              </div>
-                            );
-                          })}
+                          {/* Table Rows - Scrollable */}
+                          <div className="departures-rows-wrapper">
+                            {deps.map((dep, i) => {
+                              const eta = formatCountdown(dep.countdown, dep.real_time);
+                              const isDelayed = dep.delay_minutes > 0;
+                              
+                              return (
+                                <div 
+                                  key={i} 
+                                  className="departure-row"
+                                  onClick={() => handleDepartureClick(stop, dep)}
+                                >
+                                  <span className="col-line">
+                                    <LineBadge line={dep.line} motType={dep.mot_type} />
+                                  </span>
+                                  <span className="col-destination">{dep.direction}</span>
+                                  <span className="col-platform">{dep.platform || "-"}</span>
+                                  <span className="col-scheduled">{dep.planned_time}</span>
+                                  <span className={`col-eta ${isDelayed ? "delayed" : ""}`}>
+                                    {isDelayed ? `+${dep.delay_minutes} min` : eta.text}
+                                  </span>
+                                </div>
+                              );
+                            })}
+                          </div>
                         </>
                       )}
                     </div>
