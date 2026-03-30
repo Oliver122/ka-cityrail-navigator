@@ -4,6 +4,9 @@ on:
   push:
     branches: [development]
 
+permissions:
+  contents: write
+
 env:
   CARGO_TERM_COLOR: always
 
@@ -23,16 +26,11 @@ jobs:
           git fetch --tags
           LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
           SHORT_SHA=$(git rev-parse --short HEAD)
-          # Calculate next version (patch bump for pre_dev)
+          # Use current tag version for pre_dev
           VERSION="${LATEST_TAG#v}"
-          MAJOR=$(echo $VERSION | cut -d. -f1)
-          MINOR=$(echo $VERSION | cut -d. -f2)
-          PATCH=$(echo $VERSION | cut -d. -f3)
-          PATCH=$((PATCH + 1))
-          NEXT_VERSION="${MAJOR}.${MINOR}.${PATCH}"
-          echo "version=$NEXT_VERSION" >> $GITHUB_OUTPUT
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "sha=$SHORT_SHA" >> $GITHUB_OUTPUT
-          echo "Version: $NEXT_VERSION-pre_dev ($SHORT_SHA)"
+          echo "Version: $VERSION-pre_dev ($SHORT_SHA)"
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
