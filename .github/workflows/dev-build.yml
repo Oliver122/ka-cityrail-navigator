@@ -23,11 +23,14 @@ jobs:
       - name: Get version info
         id: version
         run: |
-          git fetch --tags
-          LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
+          git fetch --tags --force
+          # Get tags reachable from main branch only
+          LATEST_TAG=$(git describe --tags --abbrev=0 origin/main 2>/dev/null || echo "v0.0.0")
           SHORT_SHA=$(git rev-parse --short HEAD)
           # Calculate next version (patch bump for pre_dev)
           VERSION="${LATEST_TAG#v}"
+          # Handle pre_dev tags by stripping suffix
+          VERSION="${VERSION%-pre_dev}"
           MAJOR=$(echo $VERSION | cut -d. -f1)
           MINOR=$(echo $VERSION | cut -d. -f2)
           PATCH=$(echo $VERSION | cut -d. -f3)
@@ -35,7 +38,7 @@ jobs:
           NEXT_VERSION="${MAJOR}.${MINOR}.${PATCH}"
           echo "version=$NEXT_VERSION" >> $GITHUB_OUTPUT
           echo "sha=$SHORT_SHA" >> $GITHUB_OUTPUT
-          echo "Version: $NEXT_VERSION-pre_dev ($SHORT_SHA)"
+          echo "Latest tag: $LATEST_TAG -> Next: $NEXT_VERSION-pre_dev ($SHORT_SHA)"
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -85,7 +88,7 @@ jobs:
         run: |
           VERSION="${{ steps.version.outputs.version }}"
           mkdir -p dev-artifacts
-          cp src-tauri/gen/android/app/build/outputs/apk/arm64/release/*.apk dev-artifacts/ka-cityrail-navigator-${VERSION}-pre_dev.apk
+          cp src-tauri/gen/android/app/build/outputs/apk/universal/release/*.apk dev-artifacts/ka-cityrail-navigator-${VERSION}-pre_dev.apk
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
