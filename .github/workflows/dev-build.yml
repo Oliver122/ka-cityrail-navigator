@@ -26,11 +26,16 @@ jobs:
           git fetch --tags
           LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
           SHORT_SHA=$(git rev-parse --short HEAD)
-          # Use current tag version for pre_dev
+          # Calculate next version (patch bump for pre_dev)
           VERSION="${LATEST_TAG#v}"
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          MAJOR=$(echo $VERSION | cut -d. -f1)
+          MINOR=$(echo $VERSION | cut -d. -f2)
+          PATCH=$(echo $VERSION | cut -d. -f3)
+          PATCH=$((PATCH + 1))
+          NEXT_VERSION="${MAJOR}.${MINOR}.${PATCH}"
+          echo "version=$NEXT_VERSION" >> $GITHUB_OUTPUT
           echo "sha=$SHORT_SHA" >> $GITHUB_OUTPUT
-          echo "Version: $VERSION-pre_dev ($SHORT_SHA)"
+          echo "Version: $NEXT_VERSION-pre_dev ($SHORT_SHA)"
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -41,7 +46,7 @@ jobs:
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android,i686-linux-android
+          targets: aarch64-linux-android
 
       - name: Setup Java
         uses: actions/setup-java@v4
@@ -71,8 +76,8 @@ jobs:
       - name: Initialize Android project
         run: cargo tauri android init
 
-      - name: Build Android APK (Debug)
-        run: cargo tauri android build --apk --debug
+      - name: Build Android APK (Debug, arm64 only)
+        run: cargo tauri android build --apk --debug --target aarch64
         env:
           NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
 
@@ -80,7 +85,7 @@ jobs:
         run: |
           VERSION="${{ steps.version.outputs.version }}"
           mkdir -p dev-artifacts
-          cp src-tauri/gen/android/app/build/outputs/apk/universal/debug/*.apk dev-artifacts/ka-cityrail-navigator-${VERSION}-pre_dev.apk
+          cp src-tauri/gen/android/app/build/outputs/apk/arm64/debug/*.apk dev-artifacts/ka-cityrail-navigator-${VERSION}-pre_dev.apk
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
@@ -98,7 +103,7 @@ jobs:
           prerelease: true
           generate_release_notes: false
           body: |
-            Development build from `development` branch.
+            Development build from `development` branch (arm64 only).
             
             Commit: ${{ steps.version.outputs.sha }}
             
