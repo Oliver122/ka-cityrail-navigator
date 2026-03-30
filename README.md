@@ -148,6 +148,24 @@ src-tauri/
 
 ---
 
+## CI/CD Pipelines
+
+| Workflow | Trigger | What it does |
+|----------|---------|--------------|
+| **PR Validation** | Pull request to `development` or `main` | Validates the build compiles — builds frontend + Android APK (aarch64 debug) to catch errors early |
+| **Dev Build** | Push to `development` | Builds debug APK versioned as `x.x.x-pre_dev`, uploads artifact (30-day retention), creates/updates a GitHub pre-release |
+| **Release Build** | Push to `main` | Auto-bumps version based on branch/commit convention, builds debug APK, uploads artifact (90-day retention), creates git tag + GitHub Release with APK attached |
+
+### Versioning Convention
+
+Branch prefixes determine the version bump (on merge to `main`):
+- `feat/` or `[feat]` in commit → **minor** (0.**1**.0)
+- `fix/` or `[fix]` in commit → **patch** (0.0.**1**)
+- `bc/` / `breaking-change/` or `[breaking]` → **major** (**1**.0.0)
+- Anything else → defaults to **patch**
+
+---
+
 ## Recommended IDE Setup
 
 - [VS Code](https://code.visualstudio.com/) + [Tauri extension](https://marketplace.visualstudio.com/items?itemName=tauri-apps.tauri-vscode) + [rust-analyzer](https://marketplace.visualstudio.com/items?itemName=rust-lang.rust-analyzer)
