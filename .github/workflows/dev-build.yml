@@ -76,8 +76,8 @@ jobs:
       - name: Initialize Android project
         run: cargo tauri android init
 
-      - name: Build Android APK (Debug, arm64 only)
-        run: cargo tauri android build --apk --debug --target aarch64
+      - name: Build Android APK (arm64 only)
+        run: cargo tauri android build --apk --target aarch64
         env:
           NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
 
@@ -85,7 +85,7 @@ jobs:
         run: |
           VERSION="${{ steps.version.outputs.version }}"
           mkdir -p dev-artifacts
-          cp src-tauri/gen/android/app/build/outputs/apk/arm64/debug/*.apk dev-artifacts/ka-cityrail-navigator-${VERSION}-pre_dev.apk
+          cp src-tauri/gen/android/app/build/outputs/apk/arm64/release/*.apk dev-artifacts/ka-cityrail-navigator-${VERSION}-pre_dev.apk
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
@@ -103,7 +103,7 @@ jobs:
           prerelease: true
           generate_release_notes: false
           body: |
-            Development build from `development` branch (arm64 only).
+            Development build from `development` branch (arm64 only, release mode).
             
             Commit: ${{ steps.version.outputs.sha }}
             
