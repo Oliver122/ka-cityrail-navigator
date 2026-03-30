@@ -2,7 +2,7 @@ name: Dev Build
 
 on:
   push:
-    branches: [main]
+    branches: [development]
 
 env:
   CARGO_TERM_COLOR: always
@@ -23,9 +23,16 @@ jobs:
           git fetch --tags
           LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
           SHORT_SHA=$(git rev-parse --short HEAD)
-          echo "tag=$LATEST_TAG" >> $GITHUB_OUTPUT
+          # Calculate next version (patch bump for pre_dev)
+          VERSION="${LATEST_TAG#v}"
+          MAJOR=$(echo $VERSION | cut -d. -f1)
+          MINOR=$(echo $VERSION | cut -d. -f2)
+          PATCH=$(echo $VERSION | cut -d. -f3)
+          PATCH=$((PATCH + 1))
+          NEXT_VERSION="${MAJOR}.${MINOR}.${PATCH}"
+          echo "version=$NEXT_VERSION" >> $GITHUB_OUTPUT
           echo "sha=$SHORT_SHA" >> $GITHUB_OUTPUT
-          echo "Version: $LATEST_TAG-dev+$SHORT_SHA"
+          echo "Version: $NEXT_VERSION-pre_dev ($SHORT_SHA)"
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -73,27 +80,30 @@ jobs:
 
       - name: Rename artifacts
         run: |
-          VERSION="${{ steps.version.outputs.tag }}"
-          SHA="${{ steps.version.outputs.sha }}"
+          VERSION="${{ steps.version.outputs.version }}"
           mkdir -p dev-artifacts
-          cp src-tauri/gen/android/app/build/outputs/apk/universal/debug/*.apk dev-artifacts/ka-cityrail-navigator-${VERSION}-dev-${SHA}.apk
+          cp src-tauri/gen/android/app/build/outputs/apk/universal/debug/*.apk dev-artifacts/ka-cityrail-navigator-${VERSION}-pre_dev.apk
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: dev-build-${{ steps.version.outputs.sha }}
+          name: dev-build-${{ steps.version.outputs.version }}-pre_dev
           path: dev-artifacts/*.apk
           retention-days: 30
 
-      - name: Wait for release to be created
-        run: sleep 30
-
-      - name: Upload to latest release
+      - name: Create or update pre-release
         uses: softprops/action-gh-release@v1
         with:
-          tag_name: ${{ steps.version.outputs.tag }}
+          tag_name: v${{ steps.version.outputs.version }}-pre_dev
+          name: Pre-release v${{ steps.version.outputs.version }}-pre_dev
           files: dev-artifacts/*.apk
-          fail_on_unmatched_files: false
+          prerelease: true
+          generate_release_notes: false
+          body: |
+            Development build from `development` branch.
+            
+            Commit: ${{ steps.version.outputs.sha }}
+            
+            ⚠️ This is a pre-release build for testing purposes.
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        continue-on-error: true
