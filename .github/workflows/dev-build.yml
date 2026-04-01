@@ -61,22 +61,27 @@ jobs:
         run: |
           cd src-tauri/gen/android/app
           
-          # Create a temp file with the signing configuration
+          # Add FileInputStream import only if not present (Properties is already there)
+          if ! grep -q "import java.io.FileInputStream" build.gradle.kts; then
+            sed -i '/^import java.util.Properties/a import java.io.FileInputStream' build.gradle.kts
+          fi
+          
+          # Create signing config block
           cat > /tmp/signing_config.txt << 'SIGNING_EOF'
           
-          signingConfigs {
-              create("release") {
-                  val keystorePropertiesFile = rootProject.file("keystore.properties")
-                  val keystoreProperties = java.util.Properties()
-                  if (keystorePropertiesFile.exists()) {
-                      keystoreProperties.load(java.io.FileInputStream(keystorePropertiesFile))
+              signingConfigs {
+                  create("release") {
+                      val keystorePropertiesFile = rootProject.file("keystore.properties")
+                      val keystoreProperties = Properties()
+                      if (keystorePropertiesFile.exists()) {
+                          keystoreProperties.load(FileInputStream(keystorePropertiesFile))
+                      }
+                      keyAlias = keystoreProperties["keyAlias"] as String
+                      keyPassword = keystoreProperties["password"] as String
+                      storeFile = file(keystoreProperties["storeFile"] as String)
+                      storePassword = keystoreProperties["password"] as String
                   }
-                  keyAlias = keystoreProperties["keyAlias"] as String
-                  keyPassword = keystoreProperties["password"] as String
-                  storeFile = file(keystoreProperties["storeFile"] as String)
-                  storePassword = keystoreProperties["password"] as String
               }
-          }
           SIGNING_EOF
           
           # Insert signing config before buildTypes and add signingConfig to release
