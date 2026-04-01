@@ -49,18 +49,44 @@ jobs:
       - name: Initialize Android project
         run: npx tauri android init
 
-      - name: Decode Keystore
+      - name: Setup Android signing
         run: |
-          echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > src-tauri/gen/android/release.keystore
+          cd src-tauri/gen/android
+          echo "keyAlias=${{ secrets.ANDROID_KEY_ALIAS }}" > keystore.properties
+          echo "password=${{ secrets.ANDROID_KEY_PASSWORD }}" >> keystore.properties
+          echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > $RUNNER_TEMP/keystore.jks
+          echo "storeFile=$RUNNER_TEMP/keystore.jks" >> keystore.properties
+
+      - name: Configure Gradle for signing
+        run: |
+          cd src-tauri/gen/android/app
+          # Add import at the beginning
+          sed -i '1s/^/import java.io.FileInputStream\nimport java.util.Properties\n\n/' build.gradle.kts
+          
+          # Add signing config before buildTypes
+          sed -i '/buildTypes {/i \
+          signingConfigs {\
+              create("release") {\
+                  val keystorePropertiesFile = rootProject.file("keystore.properties")\
+                  val keystoreProperties = Properties()\
+                  if (keystorePropertiesFile.exists()) {\
+                      keystoreProperties.load(FileInputStream(keystorePropertiesFile))\
+                  }\
+                  keyAlias = keystoreProperties["keyAlias"] as String\
+                  keyPassword = keystoreProperties["password"] as String\
+                  storeFile = file(keystoreProperties["storeFile"] as String)\
+                  storePassword = keystoreProperties["password"] as String\
+              }\
+          }\
+          ' build.gradle.kts
+          
+          # Update release buildType to use signing config
+          sed -i 's/getByName("release") {/getByName("release") {\n            signingConfig = signingConfigs.getByName("release")/' build.gradle.kts
 
       - name: Build Android APK (arm64 only, signed)
         run: npx tauri android build --apk --target aarch64
         env:
           NDK_HOME: ${{ steps.setup-env.outputs.ndk-path }}
-          TAURI_SIGNING_STORE_PATH: ${{ github.workspace }}/src-tauri/gen/android/release.keystore
-          TAURI_SIGNING_STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          TAURI_SIGNING_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-          TAURI_SIGNING_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
 
       - name: Rename artifacts
         run: |
@@ -95,4 +121,4 @@ jobs:
 
       - name: Cleanup keystore
         if: always()
-        run: rm -f src-tauri/gen/android/release.keystore
+        run: rm -f $RUNNER_TEMP/keystore.jks src-tauri/gen/android/keystore.properties
