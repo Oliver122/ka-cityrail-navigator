@@ -162,25 +162,35 @@ jobs:
       - name: Configure Gradle for signing
         run: |
           cd src-tauri/gen/android/app
-          sed -i '1s/^/import java.io.FileInputStream\nimport java.util.Properties\n\n/' build.gradle.kts
           
-          sed -i '/buildTypes {/i \
-          signingConfigs {\
-              create("release") {\
-                  val keystorePropertiesFile = rootProject.file("keystore.properties")\
-                  val keystoreProperties = Properties()\
-                  if (keystorePropertiesFile.exists()) {\
-                      keystoreProperties.load(FileInputStream(keystorePropertiesFile))\
-                  }\
-                  keyAlias = keystoreProperties["keyAlias"] as String\
-                  keyPassword = keystoreProperties["password"] as String\
-                  storeFile = file(keystoreProperties["storeFile"] as String)\
-                  storePassword = keystoreProperties["password"] as String\
-              }\
-          }\
-          ' build.gradle.kts
+          cat > /tmp/signing_config.txt << 'SIGNING_EOF'
           
-          sed -i 's/getByName("release") {/getByName("release") {\n            signingConfig = signingConfigs.getByName("release")/' build.gradle.kts
+          signingConfigs {
+              create("release") {
+                  val keystorePropertiesFile = rootProject.file("keystore.properties")
+                  val keystoreProperties = java.util.Properties()
+                  if (keystorePropertiesFile.exists()) {
+                      keystoreProperties.load(java.io.FileInputStream(keystorePropertiesFile))
+                  }
+                  keyAlias = keystoreProperties["keyAlias"] as String
+                  keyPassword = keystoreProperties["password"] as String
+                  storeFile = file(keystoreProperties["storeFile"] as String)
+                  storePassword = keystoreProperties["password"] as String
+              }
+          }
+          SIGNING_EOF
+          
+          awk '
+            /^[[:space:]]*buildTypes[[:space:]]*\{/ {
+              while ((getline line < "/tmp/signing_config.txt") > 0) print line
+              close("/tmp/signing_config.txt")
+            }
+            { print }
+            /getByName\("release"\)[[:space:]]*\{/ {
+              print "            signingConfig = signingConfigs.getByName(\"release\")"
+            }
+          ' build.gradle.kts > build.gradle.kts.new
+          mv build.gradle.kts.new build.gradle.kts
 
       - name: Build Android AAB (Play Store)
         run: npx tauri android build --aab
