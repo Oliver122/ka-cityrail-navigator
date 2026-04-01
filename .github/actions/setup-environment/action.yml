@@ -59,7 +59,6 @@ runs:
 
     - name: Setup Android SDK
       uses: android-actions/setup-android@v3
-      shell: bash
 
     - name: Setup Android NDK
       uses: nttld/setup-ndk@v1
@@ -67,3 +66,7 @@ runs:
       with:
         ndk-version: ${{ inputs.ndk-version }}
         add-to-path: true
+
+    - name: Install npm dependencies
+      shell: bash
+      run: npm ci

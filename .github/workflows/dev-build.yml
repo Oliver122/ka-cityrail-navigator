@@ -24,12 +24,9 @@ jobs:
         id: version
         run: |
           git fetch --tags --force
-          # Get tags reachable from main branch only
           LATEST_TAG=$(git describe --tags --abbrev=0 origin/main 2>/dev/null || echo "v0.0.0")
           SHORT_SHA=$(git rev-parse --short HEAD)
-          # Calculate next version (patch bump for pre_dev)
           VERSION="${LATEST_TAG#v}"
-          # Handle pre_dev tags by stripping suffix
           VERSION="${VERSION%-pre_dev}"
           MAJOR=$(echo $VERSION | cut -d. -f1)
           MINOR=$(echo $VERSION | cut -d. -f2)
@@ -46,17 +43,14 @@ jobs:
         with:
           rust-targets: 'aarch64-linux-android'
 
-      - name: Setup Tauri CLI
-        uses: ./.github/actions/setup-tauri
-
       - name: Build frontend
         run: npm run build
 
       - name: Initialize Android project
-        run: npm run tauri android init
+        run: npx tauri android init
 
       - name: Build Android APK (arm64 only)
-        run: npm run tauri android build -- --apk --target aarch64
+        run: npx tauri android build --apk --target aarch64
         env:
           NDK_HOME: ${{ steps.setup-env.outputs.ndk-path }}
 

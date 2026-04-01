@@ -21,16 +21,13 @@ jobs:
         with:
           rust-targets: 'aarch64-linux-android'
 
-      - name: Setup Tauri CLI
-        uses: ./.github/actions/setup-tauri
-
-      - name: Lint frontend
+      - name: Build frontend
         run: npm run build
 
       - name: Initialize Android project
-        run: npm run tauri android init
+        run: npx tauri android init
 
       - name: Build Android APK (quick validation - aarch64 only)
-        run: npm run tauri android build -- --apk --target aarch64
+        run: npx tauri android build --apk --target aarch64
         env:
           NDK_HOME: ${{ steps.setup-env.outputs.ndk-path }}

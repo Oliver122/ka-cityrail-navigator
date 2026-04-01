@@ -145,21 +145,18 @@ jobs:
         with:
           rust-targets: 'aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android,i686-linux-android'
 
-      - name: Setup Tauri CLI
-        uses: ./.github/actions/setup-tauri
-
       - name: Build frontend
         run: npm run build
 
       - name: Initialize Android project
-        run: npm run tauri android init
+        run: npx tauri android init
 
       - name: Decode Keystore
         run: |
           echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > src-tauri/gen/android/release.keystore
 
       - name: Build Android AAB (Play Store)
-        run: npm run tauri android build -- --aab
+        run: npx tauri android build --aab
         env:
           NDK_HOME: ${{ steps.setup-env.outputs.ndk-path }}
           TAURI_SIGNING_STORE_PATH: ${{ github.workspace }}/src-tauri/gen/android/release.keystore
@@ -168,7 +165,7 @@ jobs:
           TAURI_SIGNING_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
 
       - name: Build Android APK (Direct Install)
-        run: npm run tauri android build -- --apk
+        run: npx tauri android build --apk
         env:
           NDK_HOME: ${{ steps.setup-env.outputs.ndk-path }}
           TAURI_SIGNING_STORE_PATH: ${{ github.workspace }}/src-tauri/gen/android/release.keystore
