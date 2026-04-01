@@ -49,10 +49,18 @@ jobs:
       - name: Initialize Android project
         run: npx tauri android init
 
-      - name: Build Android APK (arm64 only)
+      - name: Decode Keystore
+        run: |
+          echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > src-tauri/gen/android/release.keystore
+
+      - name: Build Android APK (arm64 only, signed)
         run: npx tauri android build --apk --target aarch64
         env:
           NDK_HOME: ${{ steps.setup-env.outputs.ndk-path }}
+          TAURI_SIGNING_STORE_PATH: ${{ github.workspace }}/src-tauri/gen/android/release.keystore
+          TAURI_SIGNING_STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          TAURI_SIGNING_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          TAURI_SIGNING_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
 
       - name: Rename artifacts
         run: |
@@ -76,10 +84,15 @@ jobs:
           prerelease: true
           generate_release_notes: false
           body: |
-            Development build from `development` branch (arm64 only, release mode).
+            Development build from `development` branch (arm64 only, signed).
             
             Commit: ${{ steps.version.outputs.sha }}
             
+            ✅ APK is signed - can be installed directly without Play Store.
             ⚠️ This is a pre-release build for testing purposes.
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Cleanup keystore
+        if: always()
+        run: rm -f src-tauri/gen/android/release.keystore
