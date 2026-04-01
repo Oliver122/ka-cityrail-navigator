@@ -1,0 +1,233 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  version-and-tag:
+    runs-on: ubuntu-latest
+    outputs:
+      new-version: ${{ steps.bump.outputs.new_version }}
+      bump-type: ${{ steps.bump.outputs.bump_type }}
+      should-build: ${{ steps.check.outputs.should_build }}
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Get latest tag
+        id: get_tag
+        run: |
+          git fetch --tags
+          LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
+          echo "latest=$LATEST_TAG" >> $GITHUB_OUTPUT
+          echo "Latest tag: $LATEST_TAG"
+
+      - name: Determine version bump
+        id: bump
+        run: |
+          LATEST="${{ steps.get_tag.outputs.latest }}"
+          VERSION="${LATEST#v}"
+          
+          MAJOR=$(echo $VERSION | cut -d. -f1)
+          MINOR=$(echo $VERSION | cut -d. -f2)
+          PATCH=$(echo $VERSION | cut -d. -f3)
+          
+          COMMIT_MSG=$(git log -1 --pretty=%B)
+          BRANCH_NAME=$(git log -1 --pretty=%s | grep -oP '(?<=Merge pull request #\d+ from [^/]+/)[\w-]+' || echo "")
+          
+          echo "Commit message: $COMMIT_MSG"
+          echo "Branch name: $BRANCH_NAME"
+          
+          if [[ "$BRANCH_NAME" =~ ^bc/ ]] || [[ "$BRANCH_NAME" =~ ^breaking-change/ ]] || [[ "$COMMIT_MSG" =~ \[breaking\] ]]; then
+            MAJOR=$((MAJOR + 1))
+            MINOR=0
+            PATCH=0
+            BUMP_TYPE="major"
+          elif [[ "$BRANCH_NAME" =~ ^feat/ ]] || [[ "$COMMIT_MSG" =~ \[feat\] ]]; then
+            MINOR=$((MINOR + 1))
+            PATCH=0
+            BUMP_TYPE="minor"
+          elif [[ "$BRANCH_NAME" =~ ^fix/ ]] || [[ "$COMMIT_MSG" =~ \[fix\] ]]; then
+            PATCH=$((PATCH + 1))
+            BUMP_TYPE="patch"
+          elif [[ "$COMMIT_MSG" =~ \[cicd\] ]] || [[ "$BRANCH_NAME" =~ ^cicd/ ]]; then
+            echo "CI/CD change detected - skipping version bump and build"
+            echo "new_version=$LATEST" >> $GITHUB_OUTPUT
+            echo "bump_type=none" >> $GITHUB_OUTPUT
+            exit 0
+          else
+            PATCH=$((PATCH + 1))
+            BUMP_TYPE="patch"
+          fi
+          
+          NEW_VERSION="v${MAJOR}.${MINOR}.${PATCH}"
+          echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
+          echo "bump_type=$BUMP_TYPE" >> $GITHUB_OUTPUT
+          echo "New version: $NEW_VERSION ($BUMP_TYPE)"
+
+      - name: Check if should build
+        id: check
+        run: |
+          if [ "${{ steps.bump.outputs.bump_type }}" = "none" ]; then
+            echo "should_build=false" >> $GITHUB_OUTPUT
+          else
+            echo "should_build=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Update version files
+        if: steps.check.outputs.should_build == 'true'
+        run: |
+          VERSION="${{ steps.bump.outputs.new_version }}"
+          VERSION="${VERSION#v}"
+          
+          npm version $VERSION --no-git-tag-version
+          sed -i "s/\"version\": \"[^\"]*\"/\"version\": \"$VERSION\"/" src-tauri/tauri.conf.json
+          sed -i "0,/^version = /s/^version = \"[^\"]*\"/version = \"$VERSION\"/" src-tauri/Cargo.toml
+
+      - name: Commit version bump
+        if: steps.check.outputs.should_build == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add package.json package-lock.json src-tauri/tauri.conf.json src-tauri/Cargo.toml
+          git commit -m "chore: bump version to ${{ steps.bump.outputs.new_version }}" || echo "No changes to commit"
+          git push
+
+      - name: Create and push tag
+        if: steps.check.outputs.should_build == 'true'
+        run: |
+          git tag ${{ steps.bump.outputs.new_version }}
+          git push origin ${{ steps.bump.outputs.new_version }}
+
+      - name: Create GitHub Release
+        if: steps.check.outputs.should_build == 'true'
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ steps.bump.outputs.new_version }}
+          name: Release ${{ steps.bump.outputs.new_version }}
+          generate_release_notes: true
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  build-release:
+    needs: version-and-tag
+    if: needs.version-and-tag.outputs.should-build == 'true'
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.version-and-tag.outputs.new-version }}
+
+      - name: Setup build environment
+        uses: ./.github/actions/setup-environment
+        id: setup-env
+        with:
+          rust-targets: 'aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android,i686-linux-android'
+
+      - name: Setup Tauri CLI
+        uses: ./.github/actions/setup-tauri
+
+      - name: Build frontend
+        run: npm run build
+
+      - name: Initialize Android project
+        run: npm run tauri android init
+
+      - name: Decode Keystore
+        run: |
+          echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > src-tauri/gen/android/release.keystore
+
+      - name: Build Android AAB (Play Store)
+        run: npm run tauri android build -- --aab
+        env:
+          NDK_HOME: ${{ steps.setup-env.outputs.ndk-path }}
+          TAURI_SIGNING_STORE_PATH: ${{ github.workspace }}/src-tauri/gen/android/release.keystore
+          TAURI_SIGNING_STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          TAURI_SIGNING_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          TAURI_SIGNING_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+
+      - name: Build Android APK (Direct Install)
+        run: npm run tauri android build -- --apk
+        env:
+          NDK_HOME: ${{ steps.setup-env.outputs.ndk-path }}
+          TAURI_SIGNING_STORE_PATH: ${{ github.workspace }}/src-tauri/gen/android/release.keystore
+          TAURI_SIGNING_STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          TAURI_SIGNING_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          TAURI_SIGNING_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+
+      - name: Rename artifacts
+        run: |
+          VERSION="${{ needs.version-and-tag.outputs.new-version }}"
+          mkdir -p release-artifacts
+          cp src-tauri/gen/android/app/build/outputs/bundle/universalRelease/*.aab release-artifacts/ka-cityrail-navigator-${VERSION}.aab
+          cp src-tauri/gen/android/app/build/outputs/apk/universal/release/*.apk release-artifacts/ka-cityrail-navigator-${VERSION}.apk
+
+      - name: Upload artifacts to release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ needs.version-and-tag.outputs.new-version }}
+          files: |
+            release-artifacts/*.aab
+            release-artifacts/*.apk
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload AAB artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ needs.version-and-tag.outputs.new-version }}-aab
+          path: release-artifacts/*.aab
+          retention-days: 90
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ needs.version-and-tag.outputs.new-version }}-apk
+          path: release-artifacts/*.apk
+          retention-days: 90
+
+      - name: Cleanup keystore
+        if: always()
+        run: rm -f src-tauri/gen/android/release.keystore
+
+  upload-playstore:
+    needs: [version-and-tag, build-release]
+    runs-on: ubuntu-latest
+    if: needs.version-and-tag.outputs.should-build == 'true' && vars.AUTO_PUBLISH_PLAYSTORE == 'true'
+    
+    steps:
+      - name: Download AAB
+        uses: actions/download-artifact@v4
+        with:
+          name: release-${{ needs.version-and-tag.outputs.new-version }}-aab
+          path: ./
+
+      - name: Upload to Play Store
+        uses: r0adkll/upload-google-play@v1
+        with:
+          serviceAccountJsonPlainText: ${{ secrets.PLAY_STORE_SERVICE_ACCOUNT_JSON }}
+          packageName: com.oliver.ka-cityrail-navigator
+          releaseFiles: "*.aab"
+          track: internal
+          status: completed

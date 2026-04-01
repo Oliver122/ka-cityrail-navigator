@@ -40,49 +40,25 @@ jobs:
           echo "sha=$SHORT_SHA" >> $GITHUB_OUTPUT
           echo "Latest tag: $LATEST_TAG -> Next: $NEXT_VERSION-pre_dev ($SHORT_SHA)"
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - name: Setup build environment
+        uses: ./.github/actions/setup-environment
+        id: setup-env
         with:
-          node-version: '20'
-          cache: 'npm'
+          rust-targets: 'aarch64-linux-android'
 
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: aarch64-linux-android
-
-      - name: Setup Java
-        uses: actions/setup-java@v4
-        with:
-          distribution: 'temurin'
-          java-version: '17'
-
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Setup Android NDK
-        uses: nttld/setup-ndk@v1
-        id: setup-ndk
-        with:
-          ndk-version: r26b
-          add-to-path: true
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Install Tauri CLI
-        run: cargo install tauri-cli --version "^2.0.0"
+      - name: Setup Tauri CLI
+        uses: ./.github/actions/setup-tauri
 
       - name: Build frontend
         run: npm run build
 
       - name: Initialize Android project
-        run: cargo tauri android init
+        run: npm run tauri android init
 
       - name: Build Android APK (arm64 only)
-        run: cargo tauri android build --apk --target aarch64
+        run: npm run tauri android build -- --apk --target aarch64
         env:
-          NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
+          NDK_HOME: ${{ steps.setup-env.outputs.ndk-path }}
 
       - name: Rename artifacts
         run: |
