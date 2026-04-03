@@ -12,7 +12,7 @@ jobs:
     runs-on: ubuntu-latest
     
     steps:
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
 
       - name: Setup build environment
@@ -24,10 +24,11 @@ jobs:
       - name: Build frontend
         run: npm run build
 
-      - name: Initialize Android project
+      - name: Initialize Android
         run: npx tauri android init
 
-      - name: Build Android APK (quick validation - aarch64 only)
+      - name: Build APK (validation)
         run: npx tauri android build --apk --target aarch64
         env:
           NDK_HOME: ${{ steps.setup-env.outputs.ndk-path }}
+
