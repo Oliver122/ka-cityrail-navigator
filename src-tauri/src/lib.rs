@@ -66,11 +66,27 @@ fn json_to_i64(v: &Value) -> i64 {
 }
 
 fn get_db_path() -> String {
-    let data_dir = dirs::data_local_dir()
-        .unwrap_or_else(|| std::path::PathBuf::from("."));
-    let app_dir = data_dir.join("ka-cityrail-navigator");
-    std::fs::create_dir_all(&app_dir).ok();
-    app_dir.join("stops.db").to_string_lossy().to_string()
+    // On mobile platforms, use the app's data directory
+    #[cfg(target_os = "android")]
+    {
+        // Android: use app-specific storage
+        if let Some(data_dir) = dirs::data_local_dir() {
+            let app_dir = data_dir.join("ka-cityrail-navigator");
+            std::fs::create_dir_all(&app_dir).ok();
+            return app_dir.join("stops.db").to_string_lossy().to_string();
+        }
+        // Fallback to current directory on Android if dirs fails
+        return "stops.db".to_string();
+    }
+    
+    #[cfg(not(target_os = "android"))]
+    {
+        let data_dir = dirs::data_local_dir()
+            .unwrap_or_else(|| std::path::PathBuf::from("."));
+        let app_dir = data_dir.join("ka-cityrail-navigator");
+        std::fs::create_dir_all(&app_dir).ok();
+        app_dir.join("stops.db").to_string_lossy().to_string()
+    }
 }
 
 // ── Shared helpers ────────────────────────────────────────────────────────────
@@ -441,24 +457,35 @@ fn get_network_stops(
 /// Returns None for loopback, mobile or unknown types.
 #[tauri::command]
 fn get_current_connection() -> Option<ConnectionInfo> {
-    let output = std::process::Command::new("nmcli")
-        .args(["-t", "-f", "active,name,type", "con", "show", "--active"])
-        .output()
-        .ok()?;
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    for line in stdout.lines() {
-        let parts: Vec<&str> = line.splitn(3, ':').collect();
-        if parts.len() != 3 || parts[0] != "yes" { continue; }
-        let name = parts[1].trim().to_string();
-        let conn_type = match parts[2].trim() {
-            "802-11-wireless" => "wifi",
-            "802-3-ethernet"  => "ethernet",
-            _ => continue,
-        };
-        if name.is_empty() { continue; }
-        return Some(ConnectionInfo { name, conn_type: conn_type.to_string() });
+    #[cfg(target_os = "android")]
+    {
+        // On Android, network detection requires Android-specific APIs
+        // For now, return None to disable network-based features
+        // TODO: Implement Android WiFi detection using Java/Kotlin bridge
+        return None;
     }
-    None
+    
+    #[cfg(not(target_os = "android"))]
+    {
+        let output = std::process::Command::new("nmcli")
+            .args(["-t", "-f", "active,name,type", "con", "show", "--active"])
+            .output()
+            .ok()?;
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        for line in stdout.lines() {
+            let parts: Vec<&str> = line.splitn(3, ':').collect();
+            if parts.len() != 3 || parts[0] != "yes" { continue; }
+            let name = parts[1].trim().to_string();
+            let conn_type = match parts[2].trim() {
+                "802-11-wireless" => "wifi",
+                "802-3-ethernet"  => "ethernet",
+                _ => continue,
+            };
+            if name.is_empty() { continue; }
+            return Some(ConnectionInfo { name, conn_type: conn_type.to_string() });
+        }
+        None
+    }
 }
 
 #[derive(Serialize, Debug, Clone)]
