@@ -8,6 +8,7 @@ use diesel::sqlite::SqliteConnection;
 use serde::Serialize;
 use diesel::prelude::*;
 use serde_json::Value;
+use tauri::Manager;
 
 // ── Build-time API base URLs (override via .env at compile time) ──────────────
 
@@ -65,28 +66,12 @@ fn json_to_i64(v: &Value) -> i64 {
         .unwrap_or(0)
 }
 
-fn get_db_path() -> String {
-    // On mobile platforms, use the app's data directory
-    #[cfg(target_os = "android")]
-    {
-        // Android: use app-specific storage
-        if let Some(data_dir) = dirs::data_local_dir() {
-            let app_dir = data_dir.join("ka-cityrail-navigator");
-            std::fs::create_dir_all(&app_dir).ok();
-            return app_dir.join("stops.db").to_string_lossy().to_string();
-        }
-        // Fallback to current directory on Android if dirs fails
-        return "stops.db".to_string();
-    }
-    
-    #[cfg(not(target_os = "android"))]
-    {
-        let data_dir = dirs::data_local_dir()
-            .unwrap_or_else(|| std::path::PathBuf::from("."));
-        let app_dir = data_dir.join("ka-cityrail-navigator");
-        std::fs::create_dir_all(&app_dir).ok();
-        app_dir.join("stops.db").to_string_lossy().to_string()
-    }
+fn get_db_path(app: &tauri::AppHandle) -> String {
+    // Use Tauri's app data directory - works correctly on all platforms including Android
+    let app_data_dir = app.path().app_data_dir()
+        .expect("Failed to get app data directory");
+    std::fs::create_dir_all(&app_data_dir).ok();
+    app_data_dir.join("stops.db").to_string_lossy().to_string()
 }
 
 // ── Shared helpers ────────────────────────────────────────────────────────────
@@ -455,13 +440,12 @@ fn get_network_stops(
 
 /// Get the active WiFi or wired (ethernet) connection.
 /// Returns None for loopback, mobile or unknown types.
+/// On Android, returns None as nmcli is not available.
 #[tauri::command]
 fn get_current_connection() -> Option<ConnectionInfo> {
+    // nmcli is only available on Linux desktop, not on Android
     #[cfg(target_os = "android")]
     {
-        // On Android, network detection requires Android-specific APIs
-        // For now, return None to disable network-based features
-        // TODO: Implement Android WiFi detection using Java/Kotlin bridge
         return None;
     }
     
@@ -531,13 +515,17 @@ fn remove_network(state: tauri::State<DbState>, ssid: String) -> Result<(), Stri
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let db_path = get_db_path();
-    let conn = establish_connection(&db_path);
-
     tauri::Builder::default()
         .plugin(tauri_plugin_geolocation::init())
         .plugin(tauri_plugin_opener::init())
-        .manage(DbState(Mutex::new(conn)))
+        .setup(|app| {
+            // Initialize database using Tauri's app data directory
+            // This works correctly on Android unlike dirs::data_local_dir()
+            let db_path = get_db_path(app.handle());
+            let conn = establish_connection(&db_path);
+            app.manage(DbState(Mutex::new(conn)));
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             fetch_and_store_stop, fetch_and_store_stops, fetch_stops_in_bounds,
             fetch_stops_near, get_stops, fetch_departures, search_stops, search_stops_db,
