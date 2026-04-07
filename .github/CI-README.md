@@ -14,35 +14,31 @@ Validates that the code compiles successfully. Builds a single architecture (aar
 PR opened/updated → Build validation → ✅ Pass or ❌ Fail
 ```
 
-### 2. Auto Version (`auto-version.yml`)
+### 2. Dev Build (`dev-build.yml`)
 
-**Trigger:** Push to `main` (after PR merge)
+**Trigger:** Push to `development`
 
-Automatically determines version bump based on the merged branch name and creates a release.
+Builds and signs an Android dev APK after quality checks.
 
-#### Versioning Rules
+#### Versioning Rules (based on latest commit message)
 
-| Branch Pattern | Commit Tag | Version Bump | Example |
-|----------------|------------|--------------|---------|
-| `fix/*` | `[fix]` | Patch (0.0.X) | v1.0.0 → v1.0.1 |
-| `feat/*` | `[feat]` | Minor (0.X.0) | v1.0.0 → v1.1.0 |
-| `bc/*` or `breaking-change/*` | `[breaking]` | Major (X.0.0) | v1.0.0 → v2.0.0 |
+| Commit Prefix | Version Bump | Example |
+|---------------|--------------|---------|
+| `[fix]` | Patch (0.0.X) | v1.0.0 → v1.0.1 |
+| `[feat]` | Minor (0.X.0) | v1.0.0 → v1.1.0 |
+| `[cicd]` | Patch (0.0.X) | v1.0.0 → v1.0.1 |
 
 **Actions performed:**
-1. Calculates new version from latest git tag
-2. Updates version in:
-   - `package.json`
-   - `src-tauri/tauri.conf.json`
-   - `src-tauri/Cargo.toml`
-3. Commits version bump
-4. Creates git tag (e.g., `v1.2.3`)
-5. Creates GitHub Release with auto-generated notes
+1. Calculates next prerelease tag (`vX.Y.Z-dev.N`)
+2. Runs typecheck and runtime smoke tests
+3. Builds and signs arm64 APK
+4. Uploads artifacts and creates a prerelease
 
-### 3. Release Build (`release-build.yml`)
+### 3. Release (`release.yml`)
 
-**Trigger:** GitHub Release published
+**Trigger:** Push to `main`
 
-Builds signed Android artifacts and attaches them to the release.
+Calculates release version, tags release, builds signed Android artifacts, and optionally uploads to Play Store.
 
 **Outputs:**
 - `ka-cityrail-navigator-vX.X.X.aab` - Android App Bundle (Play Store)
@@ -53,18 +49,23 @@ Builds signed Android artifacts and attaches them to the release.
 ## Flow Diagram
 
 ```
-┌──────────────────┐     ┌──────────────────┐     ┌──────────────────┐
-│   PR Created     │     │  Merge to Main   │     │ Release Created  │
-│                  │     │                  │     │                  │
-│  feat/my-feature │────▶│  auto-version    │────▶│  release-build   │
-│                  │     │  detects "feat/" │     │                  │
-└──────────────────┘     │  bumps to v0.2.0 │     │  builds signed   │
-        │                │  creates release │     │  APK + AAB       │
-        ▼                └──────────────────┘     └──────────────────┘
-┌──────────────────┐
-│  pr-validation   │
-│  (build check)   │
-└──────────────────┘
+PR opened/updated
+  -> pr-validation.yml
+     -> quality checks (typecheck + tests + build)
+     -> android-validation (init + manifest check + apk build)
+
+Push to development
+  -> dev-build.yml
+     -> quality checks
+     -> android config validation
+     -> signed dev apk prerelease
+
+Push to main
+  -> release.yml
+     -> version + tag + release creation
+     -> android config validation
+     -> signed aab + apk artifacts
+     -> optional play store upload
 ```
 
 ---
@@ -122,15 +123,14 @@ To enable automatic Play Store uploads:
 
 ---
 
-## Branch Naming Convention
+## Commit Convention
 
-Use these prefixes for automatic version bumping:
+Use commit prefixes to drive release semantics:
 
 ```
-fix/issue-123-button-bug      → Patch release (0.0.X)
-feat/add-dark-mode            → Minor release (0.X.0)
-bc/new-api-format             → Major release (X.0.0)
-breaking-change/v2-migration  → Major release (X.0.0)
+[fix] short description   -> patch bump
+[feat] short description  -> minor bump
+[cicd] short description  -> CI/CD-only patch bump
 ```
 
 ---
@@ -161,8 +161,8 @@ git push && git push --tags
 - Check that alias and passwords match your keystore
 
 ### Version not bumping correctly
-- Ensure branch name starts with `fix/`, `feat/`, `bc/`, or `breaking-change/`
-- Check the merge commit message in the Actions log
+- Ensure commit message starts with `[fix]` or `[feat]`
+- Check the latest commit message in the Actions log
 
 ### Play Store upload fails
 - Verify service account has correct permissions

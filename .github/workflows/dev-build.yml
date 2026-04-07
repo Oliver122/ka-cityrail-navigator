@@ -79,11 +79,29 @@ jobs:
         with:
           rust-targets: 'aarch64-linux-android'
 
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Android runtime smoke tests
+        run: npm run test:android-smoke
+
+      - name: Frontend unit tests
+        run: npm run test
+
       - name: Build frontend
         run: npm run build
 
       - name: Initialize Android project
         run: npx tauri android init
+
+      - name: Validate generated Android config
+        run: |
+          MANIFEST="src-tauri/gen/android/app/src/main/AndroidManifest.xml"
+          APP_GRADLE="src-tauri/gen/android/app/build.gradle.kts"
+          test -f "$MANIFEST"
+          test -f "$APP_GRADLE"
+          rg -q "android.permission.ACCESS_(COARSE|FINE)_LOCATION" "$MANIFEST"
+          rg -q "versionCode|versionName" "$APP_GRADLE"
 
       - name: Setup Android signing
         uses: ./.github/actions/android-signing
