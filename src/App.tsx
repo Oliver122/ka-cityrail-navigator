@@ -266,32 +266,50 @@ function App() {
 
   useEffect(() => { load(); }, [load]);
 
-  // Poll network status every 15 seconds
-  useEffect(() => {
-    const check = async () => {
-      try {
-        const [detectionAvailable, net, conn] = await Promise.all([
-          invoke<boolean>("is_network_detection_available"),
-          invoke<NetworkInfo | null>("check_current_network"),
-          invoke<ConnectionInfo | null>("get_current_connection"),
-        ]);
-        setNetworkDetectionAvailable(detectionAvailable);
-        const fallbackNetworkSsid = loadManualNetworkSsid();
-        const activeNetwork = resolveActiveNetwork(detectionAvailable, net, fallbackNetworkSsid);
-        setKnownNetwork(activeNetwork);
-        setConnType(resolveConnectionType(detectionAvailable, conn));
-        if (activeNetwork) {
-          const ns = await invoke<Stop[]>("get_network_stops", { ssid: activeNetwork.ssid });
-          setNetworkStops(ns);
-        } else {
-          setNetworkStops([]);
-        }
-      } catch { setKnownNetwork(null); setNetworkStops([]); }
-    };
-    check();
-    const id = setInterval(check, 15000);
-    return () => clearInterval(id);
+  const checkNetworkStatus = useCallback(async () => {
+    try {
+      const [detectionAvailable, net, conn] = await Promise.all([
+        invoke<boolean>("is_network_detection_available"),
+        invoke<NetworkInfo | null>("check_current_network"),
+        invoke<ConnectionInfo | null>("get_current_connection"),
+      ]);
+      setNetworkDetectionAvailable(detectionAvailable);
+      const fallbackNetworkSsid = loadManualNetworkSsid();
+      const activeNetwork = resolveActiveNetwork(detectionAvailable, net, fallbackNetworkSsid);
+      setKnownNetwork(activeNetwork);
+      setConnType(resolveConnectionType(detectionAvailable, conn));
+      if (activeNetwork) {
+        const ns = await invoke<Stop[]>("get_network_stops", { ssid: activeNetwork.ssid });
+        setNetworkStops(ns);
+      } else {
+        setNetworkStops([]);
+      }
+    } catch {
+      setKnownNetwork(null);
+      setNetworkStops([]);
+    }
   }, []);
+
+  // Poll network status and react instantly to manual profile changes.
+  useEffect(() => {
+    checkNetworkStatus();
+    const id = setInterval(checkNetworkStatus, 15000);
+    const onManualNetworkUpdated = () => {
+      void checkNetworkStatus();
+    };
+    window.addEventListener("manual-network-updated", onManualNetworkUpdated);
+    return () => {
+      clearInterval(id);
+      window.removeEventListener("manual-network-updated", onManualNetworkUpdated);
+    };
+  }, [checkNetworkStatus]);
+
+  // Re-check when returning to departures for fresher network UI.
+  useEffect(() => {
+    if (page === "departures") {
+      void checkNetworkStatus();
+    }
+  }, [page, checkNetworkStatus]);
 
   const sortByDist = (arr: Stop[]) =>
     userLocation

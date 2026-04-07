@@ -29,3 +29,7 @@ diesel_migrations = "2"
 reqwest = { version = "0.12", default-features = false, features = ["json", "blocking", "rustls-tls"] }
 tauri-plugin-geolocation = "2.3.2"
 
+[target.'cfg(target_os = "android")'.dependencies]
+jni = "0.21"
+ndk-context = "0.1"
+

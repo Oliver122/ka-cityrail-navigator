@@ -9,6 +9,10 @@ use serde::Serialize;
 use diesel::prelude::*;
 use serde_json::Value;
 use tauri::Manager;
+#[cfg(target_os = "android")]
+use jni::objects::{JObject, JString, JValue};
+#[cfg(target_os = "android")]
+use jni::JavaVM;
 
 // ── Build-time API base URLs (override via .env at compile time) ──────────────
 
@@ -443,10 +447,70 @@ fn get_network_stops(
 /// On Android, returns None as nmcli is not available.
 #[tauri::command]
 fn get_current_connection() -> Option<ConnectionInfo> {
-    // nmcli is only available on Linux desktop, not on Android
+    // On Android, resolve active WiFi SSID through WifiManager via JNI.
     #[cfg(target_os = "android")]
     {
-        return None;
+        fn android_current_wifi_ssid() -> Option<String> {
+            let ctx = ndk_context::android_context();
+            let vm = unsafe { JavaVM::from_raw(ctx.vm().cast()) }.ok()?;
+            let mut env = vm.attach_current_thread().ok()?;
+            let context = unsafe { JObject::from_raw(ctx.context().cast()) };
+
+            let service_name = env.new_string("wifi").ok()?;
+            let wifi_manager = env
+                .call_method(
+                    &context,
+                    "getSystemService",
+                    "(Ljava/lang/String;)Ljava/lang/Object;",
+                    &[JValue::Object(&JObject::from(service_name))],
+                )
+                .ok()?
+                .l()
+                .ok()?;
+
+            if wifi_manager.is_null() {
+                return None;
+            }
+
+            let wifi_info = env
+                .call_method(
+                    &wifi_manager,
+                    "getConnectionInfo",
+                    "()Landroid/net/wifi/WifiInfo;",
+                    &[],
+                )
+                .ok()?
+                .l()
+                .ok()?;
+
+            if wifi_info.is_null() {
+                return None;
+            }
+
+            let ssid_obj = env
+                .call_method(&wifi_info, "getSSID", "()Ljava/lang/String;", &[])
+                .ok()?
+                .l()
+                .ok()?;
+
+            if ssid_obj.is_null() {
+                return None;
+            }
+
+            let ssid_java = JString::from(ssid_obj);
+            let mut ssid = env.get_string(&ssid_java).ok()?.to_string_lossy().into_owned();
+            ssid = ssid.trim().trim_matches('"').to_string();
+            if ssid.is_empty() || ssid.eq_ignore_ascii_case("<unknown ssid>") {
+                return None;
+            }
+            Some(ssid)
+        }
+
+        let name = android_current_wifi_ssid()?;
+        return Some(ConnectionInfo {
+            name,
+            conn_type: "wifi".to_string(),
+        });
     }
     
     #[cfg(not(target_os = "android"))]

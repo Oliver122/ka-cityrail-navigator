@@ -68,7 +68,9 @@ export function loadManualNetworkSsid(): string | null {
 export function saveManualNetworkSsid(ssid: string | null): void {
   if (!ssid || !ssid.trim()) {
     localStorage.removeItem(MANUAL_NETWORK_KEY);
+    window.dispatchEvent(new Event("manual-network-updated"));
     return;
   }
   localStorage.setItem(MANUAL_NETWORK_KEY, ssid.trim());
+  window.dispatchEvent(new Event("manual-network-updated"));
 }
