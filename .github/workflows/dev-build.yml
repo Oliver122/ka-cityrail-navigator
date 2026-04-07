@@ -103,8 +103,8 @@ jobs:
           APP_GRADLE="src-tauri/gen/android/app/build.gradle.kts"
           test -f "$MANIFEST"
           test -f "$APP_GRADLE"
-          rg -q "android.permission.ACCESS_(COARSE|FINE)_LOCATION" "$MANIFEST"
-          rg -q "versionCode|versionName" "$APP_GRADLE"
+          grep -Eq "android.permission.ACCESS_(COARSE|FINE)_LOCATION" "$MANIFEST"
+          grep -Eq "versionCode|versionName" "$APP_GRADLE"
 
       - name: Setup Android signing
         uses: ./.github/actions/android-signing
