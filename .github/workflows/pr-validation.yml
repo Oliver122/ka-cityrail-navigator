@@ -59,8 +59,16 @@ jobs:
       - name: Validate generated Android permissions
         run: |
           MANIFEST="src-tauri/gen/android/app/src/main/AndroidManifest.xml"
+          CAPABILITIES="src-tauri/capabilities/default.json"
           test -f "$MANIFEST"
-          grep -Eq "android.permission.ACCESS_(COARSE|FINE)_LOCATION" "$MANIFEST"
+          if grep -Eq "android.permission.ACCESS_(COARSE|FINE)_LOCATION" "$MANIFEST"; then
+            echo "Location permission present in generated manifest."
+          elif grep -Eq "geolocation:allow-(request-permissions|get-current-position)" "$CAPABILITIES"; then
+            echo "Manifest permission not found at init stage; geolocation capability is configured."
+          else
+            echo "Missing Android location permission and geolocation capability configuration."
+            exit 1
+          fi
 
       - name: Build APK (validation)
         run: npx tauri android build --apk --target aarch64

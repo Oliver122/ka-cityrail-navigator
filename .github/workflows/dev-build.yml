@@ -101,9 +101,17 @@ jobs:
         run: |
           MANIFEST="src-tauri/gen/android/app/src/main/AndroidManifest.xml"
           APP_GRADLE="src-tauri/gen/android/app/build.gradle.kts"
+          CAPABILITIES="src-tauri/capabilities/default.json"
           test -f "$MANIFEST"
           test -f "$APP_GRADLE"
-          grep -Eq "android.permission.ACCESS_(COARSE|FINE)_LOCATION" "$MANIFEST"
+          if grep -Eq "android.permission.ACCESS_(COARSE|FINE)_LOCATION" "$MANIFEST"; then
+            echo "Location permission present in generated manifest."
+          elif grep -Eq "geolocation:allow-(request-permissions|get-current-position)" "$CAPABILITIES"; then
+            echo "Manifest permission not found at init stage; geolocation capability is configured."
+          else
+            echo "Missing Android location permission and geolocation capability configuration."
+            exit 1
+          fi
           grep -Eq "versionCode|versionName" "$APP_GRADLE"
 
       - name: Setup Android signing
