@@ -11,15 +11,14 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  version-and-tag:
+  version:
     runs-on: ubuntu-latest
     outputs:
-      new-version: ${{ steps.bump.outputs.new_version }}
-      bump-type: ${{ steps.bump.outputs.bump_type }}
-      should-build: ${{ steps.check.outputs.should_build }}
+      version: ${{ steps.bump.outputs.version }}
+      should-release: ${{ steps.bump.outputs.should_release }}
     
     steps:
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
@@ -31,114 +30,103 @@ jobs:
           node-version: '20'
           cache: 'npm'
 
-      - name: Get latest tag
-        id: get_tag
-        run: |
-          git fetch --tags
-          LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
-          echo "latest=$LATEST_TAG" >> $GITHUB_OUTPUT
-          echo "Latest tag: $LATEST_TAG"
+      - name: Install dependencies
+        run: npm ci
 
-      - name: Determine version bump
+      - name: Calculate version
         id: bump
         run: |
-          LATEST="${{ steps.get_tag.outputs.latest }}"
+          git fetch --tags --force
+          
+          # Get latest stable tag
+          LATEST=$(git tag -l 'v[0-9]*.[0-9]*.[0-9]' --sort=-v:refname | grep -v '-' | head -1 || echo "v0.0.0")
           VERSION="${LATEST#v}"
           
           MAJOR=$(echo $VERSION | cut -d. -f1)
           MINOR=$(echo $VERSION | cut -d. -f2)
           PATCH=$(echo $VERSION | cut -d. -f3)
           
+          # Determine bump type from commit/branch
           COMMIT_MSG=$(git log -1 --pretty=%B)
-          BRANCH_NAME=$(git log -1 --pretty=%s | grep -oP '(?<=Merge pull request #\d+ from [^/]+/)[\w-]+' || echo "")
+          BRANCH=$(git log -1 --pretty=%s | grep -oP '(?<=from [^/]+/)[\w/-]+' | head -1 || echo "")
           
-          echo "Commit message: $COMMIT_MSG"
-          echo "Branch name: $BRANCH_NAME"
+          echo "Commit: $COMMIT_MSG"
+          echo "Branch: $BRANCH"
           
-          if [[ "$BRANCH_NAME" =~ ^bc/ ]] || [[ "$BRANCH_NAME" =~ ^breaking-change/ ]] || [[ "$COMMIT_MSG" =~ \[breaking\] ]]; then
-            MAJOR=$((MAJOR + 1))
-            MINOR=0
-            PATCH=0
-            BUMP_TYPE="major"
-          elif [[ "$BRANCH_NAME" =~ ^feat/ ]] || [[ "$COMMIT_MSG" =~ \[feat\] ]]; then
-            MINOR=$((MINOR + 1))
-            PATCH=0
-            BUMP_TYPE="minor"
-          elif [[ "$BRANCH_NAME" =~ ^fix/ ]] || [[ "$COMMIT_MSG" =~ \[fix\] ]]; then
-            PATCH=$((PATCH + 1))
-            BUMP_TYPE="patch"
-          elif [[ "$COMMIT_MSG" =~ \[cicd\] ]] || [[ "$BRANCH_NAME" =~ ^cicd/ ]]; then
-            echo "CI/CD change detected - skipping version bump and build"
-            echo "new_version=$LATEST" >> $GITHUB_OUTPUT
-            echo "bump_type=none" >> $GITHUB_OUTPUT
+          # Skip CI/CD only changes
+          if [[ "$COMMIT_MSG" =~ ^\[cicd\] ]] || [[ "$BRANCH" =~ ^cicd/ ]]; then
+            echo "CI/CD change - skipping release"
+            echo "should_release=false" >> $GITHUB_OUTPUT
+            echo "version=$LATEST" >> $GITHUB_OUTPUT
             exit 0
+          fi
+          
+          # Determine version bump
+          if [[ "$BRANCH" =~ ^bc/ ]] || [[ "$BRANCH" =~ ^breaking/ ]] || [[ "$COMMIT_MSG" =~ \[breaking\] ]]; then
+            MAJOR=$((MAJOR + 1)); MINOR=0; PATCH=0
+            BUMP="major"
+          elif [[ "$BRANCH" =~ ^feat/ ]] || [[ "$COMMIT_MSG" =~ \[feat\] ]]; then
+            MINOR=$((MINOR + 1)); PATCH=0
+            BUMP="minor"
           else
             PATCH=$((PATCH + 1))
-            BUMP_TYPE="patch"
+            BUMP="patch"
           fi
           
           NEW_VERSION="v${MAJOR}.${MINOR}.${PATCH}"
-          echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
-          echo "bump_type=$BUMP_TYPE" >> $GITHUB_OUTPUT
-          echo "New version: $NEW_VERSION ($BUMP_TYPE)"
-
-      - name: Check if should build
-        id: check
-        run: |
-          if [ "${{ steps.bump.outputs.bump_type }}" = "none" ]; then
-            echo "should_build=false" >> $GITHUB_OUTPUT
-          else
-            echo "should_build=true" >> $GITHUB_OUTPUT
-          fi
+          echo "version=$NEW_VERSION" >> $GITHUB_OUTPUT
+          echo "should_release=true" >> $GITHUB_OUTPUT
+          echo "Bump: $BUMP | $LATEST -> $NEW_VERSION"
 
       - name: Update version files
-        if: steps.check.outputs.should_build == 'true'
+        if: steps.bump.outputs.should_release == 'true'
         run: |
-          VERSION="${{ steps.bump.outputs.new_version }}"
+          VERSION="${{ steps.bump.outputs.version }}"
           VERSION="${VERSION#v}"
           
           npm version $VERSION --no-git-tag-version
           sed -i "s/\"version\": \"[^\"]*\"/\"version\": \"$VERSION\"/" src-tauri/tauri.conf.json
           sed -i "0,/^version = /s/^version = \"[^\"]*\"/version = \"$VERSION\"/" src-tauri/Cargo.toml
 
-      - name: Commit version bump
-        if: steps.check.outputs.should_build == 'true'
+      - name: Commit and tag
+        if: steps.bump.outputs.should_release == 'true'
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
+          TAG="${{ steps.bump.outputs.version }}"
           git add package.json package-lock.json src-tauri/tauri.conf.json src-tauri/Cargo.toml
-          git commit -m "chore: bump version to ${{ steps.bump.outputs.new_version }}" || echo "No changes to commit"
+          if ! git diff --cached --quiet; then
+            git commit -m "chore: release ${TAG}"
+          else
+            echo "No version file changes to commit."
+          fi
+          if git rev-parse "${TAG}" >/dev/null 2>&1; then
+            echo "Tag ${TAG} already exists locally."
+          else
+            git tag "${TAG}"
+          fi
           git push
-
-      - name: Create and push tag
-        if: steps.check.outputs.should_build == 'true'
-        run: |
-          git tag ${{ steps.bump.outputs.new_version }}
-          git push origin ${{ steps.bump.outputs.new_version }}
+          git push origin "${TAG}"
 
       - name: Create GitHub Release
-        if: steps.check.outputs.should_build == 'true'
+        if: steps.bump.outputs.should_release == 'true'
         uses: softprops/action-gh-release@v1
         with:
-          tag_name: ${{ steps.bump.outputs.new_version }}
-          name: Release ${{ steps.bump.outputs.new_version }}
+          tag_name: ${{ steps.bump.outputs.version }}
+          name: ${{ steps.bump.outputs.version }}
           generate_release_notes: true
-          draft: false
-          prerelease: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  build-release:
-    needs: version-and-tag
-    if: needs.version-and-tag.outputs.should-build == 'true'
+  build:
+    needs: version
+    if: needs.version.outputs.should-release == 'true'
     runs-on: ubuntu-latest
     environment: Vars
     
     steps:
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
         with:
-          ref: ${{ needs.version-and-tag.outputs.new-version }}
+          ref: ${{ needs.version.outputs.version }}
 
       - name: Setup build environment
         uses: ./.github/actions/setup-environment
@@ -146,114 +134,85 @@ jobs:
         with:
           rust-targets: 'aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android,i686-linux-android'
 
+      - name: Install dependencies
+        run: npm ci
+
       - name: Build frontend
         run: npm run build
 
       - name: Initialize Android project
         run: npx tauri android init
 
-      - name: Setup Android signing
+      - name: Validate generated Android config
         run: |
-          cd src-tauri/gen/android
-          echo "keyAlias=${{ secrets.ANDROID_KEY_ALIAS }}" > keystore.properties
-          echo "password=${{ secrets.ANDROID_KEY_PASSWORD }}" >> keystore.properties
-          echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > $RUNNER_TEMP/keystore.jks
-          echo "storeFile=$RUNNER_TEMP/keystore.jks" >> keystore.properties
-
-      - name: Configure Gradle for signing
-        run: |
-          cd src-tauri/gen/android/app
-          
-          # Add FileInputStream import only if not present (Properties is already there)
-          if ! grep -q "import java.io.FileInputStream" build.gradle.kts; then
-            sed -i '/^import java.util.Properties/a import java.io.FileInputStream' build.gradle.kts
+          MANIFEST="src-tauri/gen/android/app/src/main/AndroidManifest.xml"
+          APP_GRADLE="src-tauri/gen/android/app/build.gradle.kts"
+          CAPABILITIES="src-tauri/capabilities/default.json"
+          test -f "$MANIFEST"
+          test -f "$APP_GRADLE"
+          if grep -Eq "android.permission.ACCESS_(COARSE|FINE)_LOCATION" "$MANIFEST"; then
+            echo "Location permission present in generated manifest."
+          elif grep -Eq "geolocation:allow-(request-permissions|get-current-position)" "$CAPABILITIES"; then
+            echo "Manifest permission not found at init stage; geolocation capability is configured."
+          else
+            echo "Missing Android location permission and geolocation capability configuration."
+            exit 1
           fi
-          
-          # Create signing config block
-          cat > /tmp/signing_config.txt << 'SIGNING_EOF'
-          
-              signingConfigs {
-                  create("release") {
-                      val keystorePropertiesFile = rootProject.file("keystore.properties")
-                      val keystoreProperties = Properties()
-                      if (keystorePropertiesFile.exists()) {
-                          keystoreProperties.load(FileInputStream(keystorePropertiesFile))
-                      }
-                      keyAlias = keystoreProperties["keyAlias"] as String
-                      keyPassword = keystoreProperties["password"] as String
-                      storeFile = file(keystoreProperties["storeFile"] as String)
-                      storePassword = keystoreProperties["password"] as String
-                  }
-              }
-          SIGNING_EOF
-          
-          awk '
-            /^[[:space:]]*buildTypes[[:space:]]*\{/ {
-              while ((getline line < "/tmp/signing_config.txt") > 0) print line
-              close("/tmp/signing_config.txt")
-            }
-            { print }
-            /getByName\("release"\)[[:space:]]*\{/ {
-              print "            signingConfig = signingConfigs.getByName(\"release\")"
-            }
-          ' build.gradle.kts > build.gradle.kts.new
-          mv build.gradle.kts.new build.gradle.kts
+          grep -Eq "versionCode|versionName" "$APP_GRADLE"
 
-      - name: Build Android AAB (Play Store)
+      - name: Setup Android signing
+        uses: ./.github/actions/android-signing
+        with:
+          keystore-base64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          key-alias: ${{ secrets.ANDROID_KEY_ALIAS }}
+          key-password: ${{ secrets.ANDROID_KEY_PASSWORD }}
+
+      - name: Build AAB (Play Store)
         run: npx tauri android build --aab
         env:
           NDK_HOME: ${{ steps.setup-env.outputs.ndk-path }}
 
-      - name: Build Android APK (Direct Install)
+      - name: Build APK (Direct Install)
         run: npx tauri android build --apk
         env:
           NDK_HOME: ${{ steps.setup-env.outputs.ndk-path }}
 
-      - name: Rename artifacts
+      - name: Package artifacts
         run: |
-          VERSION="${{ needs.version-and-tag.outputs.new-version }}"
-          mkdir -p release-artifacts
-          cp src-tauri/gen/android/app/build/outputs/bundle/universalRelease/*.aab release-artifacts/ka-cityrail-navigator-${VERSION}.aab
-          cp src-tauri/gen/android/app/build/outputs/apk/universal/release/*.apk release-artifacts/ka-cityrail-navigator-${VERSION}.apk
+          VERSION="${{ needs.version.outputs.version }}"
+          mkdir -p artifacts
+          cp src-tauri/gen/android/app/build/outputs/bundle/universalRelease/*.aab artifacts/ka-cityrail-navigator-${VERSION}.aab
+          cp src-tauri/gen/android/app/build/outputs/apk/universal/release/*.apk artifacts/ka-cityrail-navigator-${VERSION}.apk
 
-      - name: Upload artifacts to release
+      - name: Upload to release
         uses: softprops/action-gh-release@v1
         with:
-          tag_name: ${{ needs.version-and-tag.outputs.new-version }}
-          files: |
-            release-artifacts/*.aab
-            release-artifacts/*.apk
+          tag_name: ${{ needs.version.outputs.version }}
+          files: artifacts/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Upload AAB artifact
+      - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: release-${{ needs.version-and-tag.outputs.new-version }}-aab
-          path: release-artifacts/*.aab
+          name: release-${{ needs.version.outputs.version }}
+          path: artifacts/*
           retention-days: 90
 
-      - name: Upload APK artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: release-${{ needs.version-and-tag.outputs.new-version }}-apk
-          path: release-artifacts/*.apk
-          retention-days: 90
-
-      - name: Cleanup keystore
+      - name: Cleanup
         if: always()
         run: rm -f $RUNNER_TEMP/keystore.jks src-tauri/gen/android/keystore.properties
 
-  upload-playstore:
-    needs: [version-and-tag, build-release]
+  publish:
+    needs: [version, build]
+    if: needs.version.outputs.should-release == 'true' && vars.AUTO_PUBLISH_PLAYSTORE == 'true'
     runs-on: ubuntu-latest
-    if: needs.version-and-tag.outputs.should-build == 'true' && vars.AUTO_PUBLISH_PLAYSTORE == 'true'
     
     steps:
       - name: Download AAB
         uses: actions/download-artifact@v4
         with:
-          name: release-${{ needs.version-and-tag.outputs.new-version }}-aab
+          name: release-${{ needs.version.outputs.version }}
           path: ./
 
       - name: Upload to Play Store
@@ -264,3 +223,4 @@ jobs:
           releaseFiles: "*.aab"
           track: internal
           status: completed
+

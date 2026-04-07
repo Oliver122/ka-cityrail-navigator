@@ -8,11 +8,40 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  validate:
+  quality:
     runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Android runtime smoke tests
+        run: npm run test:android-smoke
+
+      - name: Frontend unit tests
+        run: npm run test
+
+      - name: Build frontend
+        run: npm run build
+
+  android-validation:
+    runs-on: ubuntu-latest
+    needs: quality
     
     steps:
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
 
       - name: Setup build environment
@@ -21,13 +50,28 @@ jobs:
         with:
           rust-targets: 'aarch64-linux-android'
 
-      - name: Build frontend
-        run: npm run build
+      - name: Install dependencies
+        run: npm ci
 
-      - name: Initialize Android project
+      - name: Initialize Android
         run: npx tauri android init
 
-      - name: Build Android APK (quick validation - aarch64 only)
+      - name: Validate generated Android permissions
+        run: |
+          MANIFEST="src-tauri/gen/android/app/src/main/AndroidManifest.xml"
+          CAPABILITIES="src-tauri/capabilities/default.json"
+          test -f "$MANIFEST"
+          if grep -Eq "android.permission.ACCESS_(COARSE|FINE)_LOCATION" "$MANIFEST"; then
+            echo "Location permission present in generated manifest."
+          elif grep -Eq "geolocation:allow-(request-permissions|get-current-position)" "$CAPABILITIES"; then
+            echo "Manifest permission not found at init stage; geolocation capability is configured."
+          else
+            echo "Missing Android location permission and geolocation capability configuration."
+            exit 1
+          fi
+
+      - name: Build APK (validation)
         run: npx tauri android build --apk --target aarch64
         env:
           NDK_HOME: ${{ steps.setup-env.outputs.ndk-path }}
+

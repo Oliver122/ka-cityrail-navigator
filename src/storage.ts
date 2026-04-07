@@ -18,6 +18,7 @@ export interface DisplaySettings {
 const STARRED_KEY = "ka_starred_stops";
 const COORDS_KEY  = "ka_manual_coords";
 const DISPLAY_KEY = "ka_display_settings";
+const MANUAL_NETWORK_KEY = "ka_manual_network_ssid";
 
 const DEFAULT_DISPLAY: DisplaySettings = {
   nearbyStopsLimit: 8,
@@ -55,4 +56,19 @@ export function loadDisplaySettings(): DisplaySettings {
 
 export function saveDisplaySettings(settings: DisplaySettings): void {
   localStorage.setItem(DISPLAY_KEY, JSON.stringify(settings));
+}
+
+export function loadManualNetworkSsid(): string | null {
+  const raw = localStorage.getItem(MANUAL_NETWORK_KEY);
+  if (!raw) return null;
+  const trimmed = raw.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+export function saveManualNetworkSsid(ssid: string | null): void {
+  if (!ssid || !ssid.trim()) {
+    localStorage.removeItem(MANUAL_NETWORK_KEY);
+    return;
+  }
+  localStorage.setItem(MANUAL_NETWORK_KEY, ssid.trim());
 }

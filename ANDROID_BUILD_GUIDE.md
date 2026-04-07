@@ -12,7 +12,7 @@ The Android APK was crashing on startup due to platform-specific issues:
 ### 2. Linux-specific `nmcli` Command  
 **Problem:** The `get_current_connection()` function called `nmcli` (NetworkManager CLI), which only exists on Linux desktop systems.
 
-**Fix:** Added `#[cfg(target_os = "android")]` conditional compilation to return `None` on Android, disabling WiFi network detection gracefully.
+**Fix:** Kept automatic `nmcli` detection for desktop Linux and added an Android-safe fallback path. On Android, automatic SSID detection remains unavailable, but users can now select a manual active network profile in settings.
 
 ### 3. Removed Unnecessary Dependency
 **Change:** Removed the `dirs` crate dependency since we now use Tauri's built-in path resolution.
@@ -48,8 +48,8 @@ npm run tauri android build
 
 ## Known Limitations on Android
 
-- **WiFi Network Detection:** Disabled on Android. The app won't automatically detect which WiFi network you're connected to.
-- **Network-based Stop Pinning:** Features that rely on automatic network detection won't work on Android.
+- **Automatic WiFi Network Detection:** Still unavailable on Android. The app cannot read SSID automatically.
+- **Manual Network Profile Required:** To use network-pinned stop behavior on Android, users must set an active network profile in settings.
 
 ## Testing
 
@@ -57,4 +57,4 @@ After rebuilding:
 1. Install the APK on your Android device
 2. The app should now start without crashing
 3. Core features (stop search, departures, geolocation) should work
-4. Network-based features will be disabled
+4. In Settings -> Known Networks, set a manual active network profile and verify pinned-network behavior
