@@ -1,8 +1,9 @@
 import { useEffect, useState, useCallback, useRef, TouchEvent } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentPosition, requestPermissions } from "@tauri-apps/plugin-geolocation";
-import { Stop, ManualCoords, DisplaySettings, loadStarred, saveStarred, loadManualCoords, loadDisplaySettings } from "./storage";
+import { Stop, ManualCoords, DisplaySettings, loadStarred, saveStarred, loadManualCoords, loadDisplaySettings, loadManualNetworkSsid } from "./storage";
 import { ConnectionInfo, AppPage, DepartureDetail, RouteStop } from "./types";
+import { resolveActiveNetwork, resolveConnectionType, shouldUseManualLocation, type NetworkInfo } from "./runtimeFallback";
 import { 
   BottomNav, 
   LineBadge,
@@ -25,11 +26,6 @@ import "./App.css";
 
 // Page order for swipe navigation
 const PAGE_ORDER: AppPage[] = ["departures", "settings"];
-
-interface NetworkInfo {
-  ssid: string;
-  label: string;
-}
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -215,19 +211,19 @@ function App() {
         const perms = await requestPermissions(["location"]);
         if (perms.location !== "granted") {
           const saved = loadManualCoords();
-          setManualMode(true);
+          setManualMode(shouldUseManualLocation(false, false));
           await loadFrom(saved.lat, saved.lon);
           setRefreshing(false);
           setInitialLoading(false);
           return;
         }
         const pos = await getCurrentPosition({ enableHighAccuracy: true, timeout: 10000, maximumAge: 30000 });
-        setManualMode(false);
+        setManualMode(shouldUseManualLocation(true, true));
         await loadFrom(pos.coords.latitude, pos.coords.longitude);
       } catch {
         // GPS failed — silently fall back to saved manual coords
         const saved = loadManualCoords();
-        setManualMode(true);
+        setManualMode(shouldUseManualLocation(true, false));
         await loadFrom(saved.lat, saved.lon);
       } finally {
         setRefreshing(false);
@@ -240,6 +236,7 @@ function App() {
   const [knownNetwork, setKnownNetwork] = useState<NetworkInfo | null>(null);
   const [connType, setConnType] = useState<"wifi" | "ethernet">("wifi");
   const [networkStops, setNetworkStops] = useState<Stop[]>([]);
+  const [networkDetectionAvailable, setNetworkDetectionAvailable] = useState(true);
 
   const toggleNetworkPin = useCallback(async (stop: Stop) => {
     if (!knownNetwork) return;
@@ -273,14 +270,18 @@ function App() {
   useEffect(() => {
     const check = async () => {
       try {
-        const [net, conn] = await Promise.all([
+        const [detectionAvailable, net, conn] = await Promise.all([
+          invoke<boolean>("is_network_detection_available"),
           invoke<NetworkInfo | null>("check_current_network"),
           invoke<ConnectionInfo | null>("get_current_connection"),
         ]);
-        setKnownNetwork(net);
-        if (conn) setConnType(conn.conn_type);
-        if (net) {
-          const ns = await invoke<Stop[]>("get_network_stops", { ssid: net.ssid });
+        setNetworkDetectionAvailable(detectionAvailable);
+        const fallbackNetworkSsid = loadManualNetworkSsid();
+        const activeNetwork = resolveActiveNetwork(detectionAvailable, net, fallbackNetworkSsid);
+        setKnownNetwork(activeNetwork);
+        setConnType(resolveConnectionType(detectionAvailable, conn));
+        if (activeNetwork) {
+          const ns = await invoke<Stop[]>("get_network_stops", { ssid: activeNetwork.ssid });
           setNetworkStops(ns);
         } else {
           setNetworkStops([]);
@@ -409,7 +410,7 @@ function App() {
               <span className="logo-subtitle">CityRail</span>
             </div>
             <div className="header-status">
-              {knownNetwork ? (
+          {knownNetwork ? (
                 <div className="connection-indicator connected">
                   {connType === "wifi" ? <WifiIcon /> : <EthernetIcon />}
                   <span>{knownNetwork.label}</span>
@@ -417,7 +418,7 @@ function App() {
               ) : (
                 <div className="connection-indicator">
                   <WifiIcon />
-                  <span>Offline</span>
+                  <span>{networkDetectionAvailable ? "Offline" : "No active network profile"}</span>
                 </div>
               )}
               <button 

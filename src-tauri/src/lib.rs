@@ -491,6 +491,19 @@ fn check_current_network(state: tauri::State<DbState>) -> Result<Option<Network>
         .map_err(|e| e.to_string())
 }
 
+/// Whether runtime network detection is supported on this platform.
+#[tauri::command]
+fn is_network_detection_available() -> bool {
+    #[cfg(target_os = "android")]
+    {
+        false
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        true
+    }
+}
+
 #[tauri::command]
 fn get_networks(state: tauri::State<DbState>) -> Result<Vec<Network>, String> {
     let mut conn = state.0.lock().map_err(|e| e.to_string())?;
@@ -530,7 +543,7 @@ pub fn run() {
             fetch_and_store_stop, fetch_and_store_stops, fetch_stops_in_bounds,
             fetch_stops_near, get_stops, fetch_departures, search_stops, search_stops_db,
             get_current_connection, check_current_network, get_networks, add_network, remove_network,
-            pin_stop_to_network, unpin_stop_from_network, get_network_stops
+            pin_stop_to_network, unpin_stop_from_network, get_network_stops, is_network_detection_available
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

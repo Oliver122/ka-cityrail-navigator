@@ -6,6 +6,10 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:android-smoke": "vitest run src/runtimeFallback.test.ts",
+    "check": "npm run typecheck && npm run test",
     "build": "tsc && vite build",
     "preview": "vite preview",
     "tauri": "tauri",
@@ -27,6 +31,7 @@
     "@types/react-dom": "^19.1.6",
     "@vitejs/plugin-react": "^4.6.0",
     "typescript": "~5.8.3",
-    "vite": "^7.0.4"
+    "vite": "^7.0.4",
+    "vitest": "^4.1.3"
   }
 }

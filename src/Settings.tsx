@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { Stop, ManualCoords, DisplaySettings, saveStarred, saveManualCoords, saveDisplaySettings } from "./storage";
+import { Stop, ManualCoords, DisplaySettings, saveStarred, saveManualCoords, saveDisplaySettings, loadManualNetworkSsid, saveManualNetworkSsid } from "./storage";
 import { ConnectionInfo } from "./types";
 import { 
   WifiIcon, 
@@ -42,6 +42,8 @@ export default function Settings({ starred, manualCoords, displaySettings, onSta
   // Networks state
   const [networks, setNetworks] = useState<Network[]>([]);
   const [currentConn, setCurrentConn] = useState<ConnectionInfo | null | "loading">("loading");
+  const [networkDetectionAvailable, setNetworkDetectionAvailable] = useState<boolean | null>(null);
+  const [manualNetworkSsid, setManualNetworkSsid] = useState<string | null>(loadManualNetworkSsid);
   const [newSsid, setNewSsid] = useState("");
   const [newLabel, setNewLabel] = useState("");
   const [netSaving, setNetSaving] = useState(false);
@@ -55,6 +57,9 @@ export default function Settings({ starred, manualCoords, displaySettings, onSta
 
   useEffect(() => {
     invoke<Network[]>("get_networks").then(setNetworks).catch(() => {});
+    invoke<boolean>("is_network_detection_available")
+      .then(setNetworkDetectionAvailable)
+      .catch(() => setNetworkDetectionAvailable(false));
     detectConn();
   }, [detectConn]);
 
@@ -91,6 +96,16 @@ export default function Settings({ starred, manualCoords, displaySettings, onSta
   const removeNetwork = async (ssid: string) => {
     await invoke("remove_network", { ssid });
     setNetworks((prev) => prev.filter((n) => n.ssid !== ssid));
+    if (manualNetworkSsid === ssid) {
+      saveManualNetworkSsid(null);
+      setManualNetworkSsid(null);
+    }
+  };
+
+  const selectManualNetwork = (ssid: string) => {
+    const next = manualNetworkSsid === ssid ? null : ssid;
+    saveManualNetworkSsid(next);
+    setManualNetworkSsid(next);
   };
 
   const [query, setQuery] = useState("");
@@ -326,7 +341,13 @@ export default function Settings({ starred, manualCoords, displaySettings, onSta
 
           {/* Current Connection */}
           <div className="current-connection">
-            {currentConn === "loading" ? (
+            {networkDetectionAvailable === false ? (
+              <div className="connection-status offline">
+                <WifiIcon />
+                <span>Automatic network detection is unavailable on this device. Select a registered network below.</span>
+              </div>
+            ) : (
+              currentConn === "loading" ? (
               <div className="connection-status detecting">
                 <RefreshIcon className="spin" />
                 <span>Detecting connection...</span>
@@ -357,6 +378,7 @@ export default function Settings({ starred, manualCoords, displaySettings, onSta
                   <RefreshIcon />
                 </button>
               </div>
+            )
             )}
           </div>
 
@@ -364,7 +386,7 @@ export default function Settings({ starred, manualCoords, displaySettings, onSta
           {networks.length > 0 && (
             <ul className="networks-list">
               {networks.map((n) => (
-                <li key={n.ssid} className={`network-item${n.ssid === currentName ? " active" : ""}`}>
+                <li key={n.ssid} className={`network-item${n.ssid === currentName || (networkDetectionAvailable === false && n.ssid === manualNetworkSsid) ? " active" : ""}`}>
                   <div className="network-info">
                     <WifiIcon className="network-icon" />
                     <div className="network-details">
@@ -374,6 +396,14 @@ export default function Settings({ starred, manualCoords, displaySettings, onSta
                   </div>
                   {n.ssid === currentName && (
                     <span className="network-active-badge">Connected</span>
+                  )}
+                  {networkDetectionAvailable === false && n.ssid === manualNetworkSsid && (
+                    <span className="network-active-badge">Manual active</span>
+                  )}
+                  {networkDetectionAvailable === false && (
+                    <button className="register-button" onClick={() => selectManualNetwork(n.ssid)}>
+                      {manualNetworkSsid === n.ssid ? "Clear active" : "Set active"}
+                    </button>
                   )}
                   <button className="remove-button" onClick={() => removeNetwork(n.ssid)} title="Remove">
                     <CloseIcon />
