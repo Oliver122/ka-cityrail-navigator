@@ -26,6 +26,7 @@ const KVV_COORD_BASE: &str = match option_env!("KVV_COORD_BASE_URL") {
 #[derive(Serialize, Debug)]
 pub struct Departure {
     pub stop_name: String,
+    pub stop_id: String,
     pub line: String,
     pub line_type: String,
     pub mot_type: String,
@@ -35,6 +36,34 @@ pub struct Departure {
     pub real_time: String,
     pub delay_minutes: i64,
     pub countdown: i64,
+    pub trip_code: String,
+    pub line_stateless: String,
+    pub realtime_trip_id: String,
+    pub avms_trip_id: String,
+    pub service_date: String,
+    pub service_time: String,
+}
+
+#[derive(Serialize, Debug)]
+pub struct TripRouteStop {
+    pub id: String,
+    pub name: String,
+    pub platform: String,
+    pub arrival_time: String,
+    pub departure_time: String,
+    pub longitude: Option<f64>,
+    pub latitude: Option<f64>,
+}
+
+#[derive(Serialize, Debug)]
+pub struct TripStopSeqResponse {
+    pub trip_code: String,
+    pub line_stateless: String,
+    pub line_name: String,
+    pub line_number: String,
+    pub destination: String,
+    pub path: String,
+    pub route_stops: Vec<TripRouteStop>,
 }
 
 // ── Shared helpers ─────────────────────────────────────────────────────────────
@@ -63,6 +92,34 @@ fn json_to_i64(v: &Value) -> i64 {
         .and_then(|s| s.parse().ok())
         .or_else(|| v.as_i64())
         .unwrap_or(0)
+}
+
+fn attr_value(obj: &Value, name: &str) -> Option<String> {
+    obj["attrs"]
+        .as_array()
+        .and_then(|attrs| {
+            attrs.iter().find_map(|a| {
+                if a["name"].as_str() == Some(name) {
+                    a["value"].as_str().map(|v| v.to_string())
+                } else {
+                    None
+                }
+            })
+        })
+}
+
+/// KVV `RealtimeTripId` often embeds a numeric trip token after `T0.` (e.g. `...T0.1385...`).
+fn trip_code_from_realtime_trip_id(id: &str) -> Option<String> {
+    const NEEDLE: &str = "T0.";
+    let start = id.rfind(NEEDLE)? + NEEDLE.len();
+    let rest = id.get(start..)?;
+    let end = rest
+        .find(|c: char| !c.is_ascii_digit())
+        .unwrap_or(rest.len());
+    if end == 0 {
+        return None;
+    }
+    Some(rest[..end].to_string())
 }
 
 fn get_db_path() -> String {
@@ -137,8 +194,18 @@ fn fetch_departures(stop_id: String) -> Result<Vec<Departure>, String> {
             Value::Number(n) => n.to_string(),
             _ => String::new(),
         };
+        let realtime_trip_id = attr_value(d, "RealtimeTripId").unwrap_or_default();
+        let mut trip_code = attr_value(sl, "TRIP_CODE")
+            .or_else(|| sl["tripCode"].as_str().map(|v| v.to_string()))
+            .unwrap_or_default();
+        if trip_code.is_empty() {
+            trip_code = trip_code_from_realtime_trip_id(&realtime_trip_id)
+                .or_else(|| sl["key"].as_str().map(|v| v.to_string()))
+                .unwrap_or_default();
+        }
         departures.push(Departure {
             stop_name: d["stopName"].as_str().unwrap_or("").to_string(),
+            stop_id: d["stopID"].as_str().unwrap_or(&stop_id).to_string(),
             line: sl["number"].as_str().unwrap_or("").to_string(),
             line_type: sl["name"].as_str().unwrap_or("").to_string(),
             mot_type: sl["motType"].as_str().unwrap_or("").to_string(),
@@ -148,9 +215,105 @@ fn fetch_departures(stop_id: String) -> Result<Vec<Departure>, String> {
             real_time: parse_time_field(&rdt["hour"], &rdt["minute"]),
             delay_minutes: json_to_i64(&sl["delay"]),
             countdown: json_to_i64(&d["countdown"]),
+            trip_code,
+            line_stateless: sl["stateless"].as_str().unwrap_or("").to_string(),
+            realtime_trip_id,
+            avms_trip_id: attr_value(d, "AVMSTripID").unwrap_or_default(),
+            service_date: format!(
+                "{:0>4}{:0>2}{:0>2}",
+                dt["year"].as_str().unwrap_or(""),
+                dt["month"].as_str().unwrap_or(""),
+                dt["day"].as_str().unwrap_or("")
+            ),
+            service_time: format!(
+                "{:0>2}.{:0>2}.00",
+                dt["hour"].as_str().unwrap_or(""),
+                dt["minute"].as_str().unwrap_or("")
+            ),
         });
     }
     Ok(departures)
+}
+
+#[tauri::command]
+fn fetch_trip_stopseq(
+    stop_id: String,
+    line_stateless: String,
+    trip_code: String,
+    service_date: String,
+    service_time: String,
+) -> Result<TripStopSeqResponse, String> {
+    let mut url = reqwest::Url::parse(KVV_COORD_BASE).map_err(|e| e.to_string())?;
+    url.query_pairs_mut()
+        .append_pair("action", "XML_STOPSEQCOORD_REQUEST")
+        .append_pair("jsonp", "jsonpFn6")
+        .append_pair("line", &line_stateless)
+        .append_pair("stop", &stop_id)
+        .append_pair("tripCode", &trip_code)
+        .append_pair("date", &service_date)
+        .append_pair("time", &service_time)
+        .append_pair("coordOutputFormat", "WGS84[DD.DDDDD]")
+        .append_pair("coordListOutputFormat", "string")
+        .append_pair("outputFormat", "json")
+        .append_pair("tStOTType", "NEXT")
+        .append_pair("hideBannerInfo", "1");
+
+    let raw = reqwest::blocking::get(url)
+        .map_err(|e| e.to_string())?
+        .text()
+        .map_err(|e| e.to_string())?;
+
+    let start = raw.find('(').ok_or("unexpected JSONP format: missing '('")?;
+    let end = raw.rfind(')').ok_or("unexpected JSONP format: missing ')'")?;
+    let json_str = raw[start + 1..end].trim();
+    let resp: Value = serde_json::from_str(json_str).map_err(|e| e.to_string())?;
+
+    let mode = &resp["stopSeqCoords"]["params"]["mode"];
+    let trip_code_value = mode["diva"]["tripCode"]
+        .as_str()
+        .map(|v| v.to_string())
+        .or_else(|| mode["diva"]["tripCode"].as_i64().map(|v| v.to_string()))
+        .unwrap_or_else(|| trip_code.clone());
+
+    let stop_seq = resp["stopSeqCoords"]["params"]["stopSeq"]
+        .as_array()
+        .ok_or("missing stop sequence")?;
+
+    let mut route_stops = Vec::with_capacity(stop_seq.len());
+    for stop in stop_seq {
+        let ref_obj = &stop["ref"];
+        let coords = ref_obj["coords"].as_str().unwrap_or("");
+        let mut coord_parts = coords.split(',');
+        let longitude = coord_parts.next().and_then(|v| v.parse::<f64>().ok());
+        let latitude = coord_parts.next().and_then(|v| v.parse::<f64>().ok());
+        route_stops.push(TripRouteStop {
+            id: ref_obj["id"].as_str().unwrap_or("").to_string(),
+            name: stop["name"].as_str().unwrap_or("").to_string(),
+            platform: stop["platformName"].as_str().unwrap_or("").to_string(),
+            arrival_time: ref_obj["arrDateTimeSec"]
+                .as_str()
+                .or_else(|| ref_obj["arrDateTime"].as_str())
+                .unwrap_or("")
+                .to_string(),
+            departure_time: ref_obj["depDateTimeSec"]
+                .as_str()
+                .or_else(|| ref_obj["depDateTime"].as_str())
+                .unwrap_or("")
+                .to_string(),
+            longitude,
+            latitude,
+        });
+    }
+
+    Ok(TripStopSeqResponse {
+        trip_code: trip_code_value,
+        line_stateless: mode["diva"]["stateless"].as_str().unwrap_or("").to_string(),
+        line_name: mode["name"].as_str().unwrap_or("").to_string(),
+        line_number: mode["number"].as_str().unwrap_or("").to_string(),
+        destination: mode["destination"].as_str().unwrap_or("").to_string(),
+        path: resp["stopSeqCoords"]["coords"]["path"].as_str().unwrap_or("").to_string(),
+        route_stops,
+    })
 }
 
 
@@ -514,6 +677,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             fetch_and_store_stop, fetch_and_store_stops, fetch_stops_in_bounds,
             fetch_stops_near, get_stops, fetch_departures, search_stops, search_stops_db,
+            fetch_trip_stopseq,
             get_current_connection, check_current_network, get_networks, add_network, remove_network,
             pin_stop_to_network, unpin_stop_from_network, get_network_stops
         ])
