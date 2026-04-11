@@ -12,6 +12,8 @@ export interface RouteStop {
   arrivalTime?: string;
   departureTime?: string;
   platform?: string;
+  longitude?: number;
+  latitude?: number;
   status: "passed" | "current" | "upcoming";
   delayMinutes?: number;
 }
@@ -28,6 +30,10 @@ export interface DepartureDetail {
   delayMinutes: number;
   countdown: number;
   stopName: string;
+  tripCode?: string;
+  realtimeTripId?: string;
+  lineStateless?: string;
+  routePath?: string;
   routeStops: RouteStop[];
   disruption?: string;
 }

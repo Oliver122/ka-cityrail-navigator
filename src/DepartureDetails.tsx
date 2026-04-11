@@ -24,9 +24,9 @@ function RouteTimeline({ stops }: { stops: RouteStop[] }) {
               {stop.platform && <span className="timeline-platform">Gl. {stop.platform}</span>}
             </div>
             <div className="timeline-time">
-              {stop.arrivalTime && (
+              {(stop.arrivalTime || stop.departureTime) && (
                 <span className={stop.delayMinutes && stop.delayMinutes > 0 ? "time-delayed" : ""}>
-                  {stop.arrivalTime}
+                  {stop.arrivalTime || stop.departureTime}
                   {stop.delayMinutes && stop.delayMinutes > 0 && (
                     <span className="delay-badge">+{stop.delayMinutes}</span>
                   )}
