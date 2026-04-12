@@ -1,5 +1,6 @@
-import { ChevronLeftIcon, ShareIcon, MenuIcon, AlertIcon, MapIcon } from "./components/Icons";
+import { ChevronLeftIcon, ShareIcon, MenuIcon, AlertIcon } from "./components/Icons";
 import LineBadge from "./components/LineBadge";
+import RouteMap from "./components/RouteMap";
 import type { DepartureDetail, RouteStop } from "./types";
 import "./DepartureDetails.css";
 
@@ -109,11 +110,17 @@ export default function DepartureDetails({ departure, onBack }: Props) {
         <RouteTimeline stops={departure.routeStops} />
       </div>
 
-      {/* Map Button */}
-      <button className="map-button">
-        <MapIcon />
-        <span>View Full Route Map</span>
-      </button>
+      {/* Route Map */}
+      {departure.routeStops.length > 0 && departure.routeStops.some(s => s.latitude != null) && (
+        <div className="details-card route-map-card">
+          <h2 className="card-title">Route Map</h2>
+          <RouteMap
+            routeStops={departure.routeStops}
+            routePath={departure.routePath}
+            currentStopName={departure.stopName}
+          />
+        </div>
+      )}
     </main>
   );
 }
