@@ -10,13 +10,11 @@
     "frontendDist": "../dist"
   },
   "app": {
-    "withGlobalTauri": true,
     "windows": [
       {
         "title": "ka-cityrail-navigator",
         "width": 800,
-        "height": 600,
-        "zoomHotkeysEnabled": false
+        "height": 600
       }
     ],
     "security": {
