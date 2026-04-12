@@ -305,15 +305,48 @@ fn fetch_trip_stopseq(
         });
     }
 
+    let raw_path = resp["stopSeqCoords"]["coords"]["path"].as_str().unwrap_or("");
+    let trimmed_path = trim_path_to_last_stop(raw_path, &route_stops);
+
     Ok(TripStopSeqResponse {
         trip_code: trip_code_value,
         line_stateless: mode["diva"]["stateless"].as_str().unwrap_or("").to_string(),
         line_name: mode["name"].as_str().unwrap_or("").to_string(),
         line_number: mode["number"].as_str().unwrap_or("").to_string(),
         destination: mode["destination"].as_str().unwrap_or("").to_string(),
-        path: resp["stopSeqCoords"]["coords"]["path"].as_str().unwrap_or("").to_string(),
+        path: trimmed_path,
         route_stops,
     })
+}
+
+/// Trim path coordinates to the segment ending at the last route stop.
+/// The KVV API sometimes appends a backtracking segment past the terminus.
+fn trim_path_to_last_stop(raw_path: &str, stops: &[TripRouteStop]) -> String {
+    let last = match stops.last() {
+        Some(s) => s,
+        None => return raw_path.to_string(),
+    };
+    let (target_lon, target_lat) = match (last.longitude, last.latitude) {
+        (Some(lon), Some(lat)) => (lon, lat),
+        _ => return raw_path.to_string(),
+    };
+
+    let pairs: Vec<&str> = raw_path.split_whitespace().collect();
+    let mut best_idx = pairs.len().saturating_sub(1);
+    let mut best_dist = f64::MAX;
+    for (i, pair) in pairs.iter().enumerate() {
+        let mut parts = pair.split(',');
+        if let (Some(lon_s), Some(lat_s)) = (parts.next(), parts.next()) {
+            if let (Ok(lon), Ok(lat)) = (lon_s.parse::<f64>(), lat_s.parse::<f64>()) {
+                let d = (lon - target_lon).powi(2) + (lat - target_lat).powi(2);
+                if d < best_dist {
+                    best_dist = d;
+                    best_idx = i;
+                }
+            }
+        }
+    }
+    pairs[..=best_idx].join(" ")
 }
 
 

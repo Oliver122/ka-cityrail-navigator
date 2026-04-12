@@ -224,10 +224,23 @@ function App() {
       });
       setNearbyStops(nearby);
 
-      // Also load departures for starred stops not already in the nearby list
+      // Collect network-pinned stops so their departures are loaded too
+      let netStops: Stop[] = [];
+      try {
+        const net = await invoke<NetworkInfo | null>("check_current_network");
+        if (net) {
+          netStops = await invoke<Stop[]>("get_network_stops", { ssid: net.ssid });
+          setNetworkStops(netStops);
+          setKnownNetwork(net);
+        }
+      } catch { /* network detection is best-effort */ }
+
       const starred = loadStarred();
-      const extraStarred = starred.filter((s) => !nearby.some((n) => n.id === s.id));
-      const all = [...nearby, ...extraStarred];
+      const seenIds = new Set(nearby.map((s) => s.id));
+      const extraStarred = starred.filter((s) => !seenIds.has(s.id));
+      extraStarred.forEach((s) => seenIds.add(s.id));
+      const extraNetwork = netStops.filter((s) => !seenIds.has(s.id));
+      const all = [...nearby, ...extraStarred, ...extraNetwork];
 
       const results = await Promise.all(
         all.map((s) =>
