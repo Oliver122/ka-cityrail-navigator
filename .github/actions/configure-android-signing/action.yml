@@ -1,0 +1,89 @@
+name: 'Configure Android signing'
+description: 'Create keystore config and patch Gradle release signing idempotently'
+
+inputs:
+  key-alias:
+    description: 'Android key alias'
+    required: true
+  key-password:
+    description: 'Android key password'
+    required: true
+  keystore-base64:
+    description: 'Base64-encoded Android keystore'
+    required: true
+  android-root:
+    description: 'Android project root'
+    required: false
+    default: 'src-tauri/gen/android'
+  gradle-file:
+    description: 'Gradle build file to patch'
+    required: false
+    default: 'src-tauri/gen/android/app/build.gradle.kts'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Setup Android signing files
+      shell: bash
+      run: |
+        set -euo pipefail
+        {
+          echo "keyAlias=${{ inputs.key-alias }}"
+          echo "password=${{ inputs.key-password }}"
+          echo "storeFile=$RUNNER_TEMP/keystore.jks"
+        } > "${{ inputs.android-root }}/keystore.properties"
+        echo "${{ inputs.keystore-base64 }}" | base64 -d > "$RUNNER_TEMP/keystore.jks"
+
+    - name: Patch Gradle release signing
+      shell: bash
+      run: |
+        set -euo pipefail
+        GRADLE_FILE="${{ inputs.gradle-file }}"
+
+        if ! grep -q "import java.io.FileInputStream" "$GRADLE_FILE"; then
+          sed -i '/^import java.util.Properties/a import java.io.FileInputStream' "$GRADLE_FILE"
+        fi
+
+        if ! grep -q "copilot-signing-start" "$GRADLE_FILE"; then
+          cat > /tmp/signing_config.txt << 'SIGNING_EOF'
+
+              // copilot-signing-start
+              signingConfigs {
+                  create("release") {
+                      val keystorePropertiesFile = rootProject.file("keystore.properties")
+                      val keystoreProperties = Properties()
+                      if (keystorePropertiesFile.exists()) {
+                          keystoreProperties.load(FileInputStream(keystorePropertiesFile))
+                      }
+                      keyAlias = keystoreProperties["keyAlias"] as String
+                      keyPassword = keystoreProperties["password"] as String
+                      storeFile = file(keystoreProperties["storeFile"] as String)
+                      storePassword = keystoreProperties["password"] as String
+                  }
+              }
+              // copilot-signing-end
+        SIGNING_EOF
+
+          awk '
+            BEGIN { inserted=0 }
+            /^[[:space:]]*buildTypes[[:space:]]*\{/ && inserted==0 {
+              while ((getline line < "/tmp/signing_config.txt") > 0) print line
+              close("/tmp/signing_config.txt")
+              inserted=1
+            }
+            { print }
+          ' "$GRADLE_FILE" > "${GRADLE_FILE}.new"
+          mv "${GRADLE_FILE}.new" "$GRADLE_FILE"
+        fi
+
+        if ! grep -q 'signingConfig = signingConfigs.getByName("release")' "$GRADLE_FILE"; then
+          awk '
+            BEGIN { added=0 }
+            { print }
+            /getByName\("release"\)[[:space:]]*\{/ && added==0 {
+              print "            signingConfig = signingConfigs.getByName(\"release\")"
+              added=1
+            }
+          ' "$GRADLE_FILE" > "${GRADLE_FILE}.new"
+          mv "${GRADLE_FILE}.new" "$GRADLE_FILE"
+        fi
