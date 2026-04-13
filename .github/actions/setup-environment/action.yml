@@ -10,6 +10,10 @@ inputs:
     description: 'Additional Rust targets to install (comma-separated)'
     required: false
     default: ''
+  rust-toolchain:
+    description: 'Rust toolchain channel/version'
+    required: false
+    default: 'stable'
   rust-components:
     description: 'Rust components to install (comma-separated)'
     required: false
@@ -53,6 +57,7 @@ runs:
     - name: Setup Rust
       uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
       with:
+        toolchain: ${{ inputs.rust-toolchain }}
         targets: ${{ inputs.rust-targets }}
         components: ${{ inputs.rust-components }}
 
