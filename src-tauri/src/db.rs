@@ -3,7 +3,7 @@ use diesel::sqlite::SqliteConnection;
 use diesel_migrations::{embed_migrations, EmbeddedMigrations, MigrationHarness};
 use serde::Serialize;
 
-use crate::schema::{stops, networks};
+use crate::schema::{networks, stops};
 
 pub const MIGRATIONS: EmbeddedMigrations = embed_migrations!("migrations");
 
@@ -103,6 +103,5 @@ pub fn upsert_network(conn: &mut SqliteConnection, net: NewNetwork) -> QueryResu
 }
 
 pub fn delete_network(conn: &mut SqliteConnection, ssid_val: &str) -> QueryResult<usize> {
-    diesel::delete(networks::table.filter(networks::ssid.eq(ssid_val)))
-        .execute(conn)
+    diesel::delete(networks::table.filter(networks::ssid.eq(ssid_val))).execute(conn)
 }
