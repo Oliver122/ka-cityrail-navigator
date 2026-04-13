@@ -3,6 +3,13 @@ name: Dev Build
 on:
   push:
     branches: [development]
+    paths-ignore:
+      - '**/*.md'
+      - 'LICENSE'
+
+concurrency:
+  group: dev-build-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: write
@@ -17,7 +24,7 @@ jobs:
     
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
         with:
           fetch-depth: 0
 
@@ -50,63 +57,12 @@ jobs:
       - name: Initialize Android project
         run: npx tauri android init
 
-      - name: Debug secrets
-        run: |
-          echo "KEY_ALIAS length: ${#ALIAS}"
-          echo "KEY_PASSWORD length: ${#KEYPASS}"
-          echo "KEYSTORE_BASE64 length: ${#KEYSTORE}"
-        env:
-          ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-          KEYPASS: ${{ secrets.ANDROID_KEY_PASSWORD }}
-          KEYSTORE: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
-
-      - name: Setup Android signing
-        run: |
-          cd src-tauri/gen/android
-          echo "keyAlias=${{ secrets.ANDROID_KEY_ALIAS }}" > keystore.properties
-          echo "password=${{ secrets.ANDROID_KEY_PASSWORD }}" >> keystore.properties
-          echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > $RUNNER_TEMP/keystore.jks
-          echo "storeFile=$RUNNER_TEMP/keystore.jks" >> keystore.properties
-
-      - name: Configure Gradle for signing
-        run: |
-          cd src-tauri/gen/android/app
-          
-          # Add FileInputStream import only if not present (Properties is already there)
-          if ! grep -q "import java.io.FileInputStream" build.gradle.kts; then
-            sed -i '/^import java.util.Properties/a import java.io.FileInputStream' build.gradle.kts
-          fi
-          
-          # Create signing config block
-          cat > /tmp/signing_config.txt << 'SIGNING_EOF'
-          
-              signingConfigs {
-                  create("release") {
-                      val keystorePropertiesFile = rootProject.file("keystore.properties")
-                      val keystoreProperties = Properties()
-                      if (keystorePropertiesFile.exists()) {
-                          keystoreProperties.load(FileInputStream(keystorePropertiesFile))
-                      }
-                      keyAlias = keystoreProperties["keyAlias"] as String
-                      keyPassword = keystoreProperties["password"] as String
-                      storeFile = file(keystoreProperties["storeFile"] as String)
-                      storePassword = keystoreProperties["password"] as String
-                  }
-              }
-          SIGNING_EOF
-          
-          # Insert signing config before buildTypes and add signingConfig to release
-          awk '
-            /^[[:space:]]*buildTypes[[:space:]]*\{/ {
-              while ((getline line < "/tmp/signing_config.txt") > 0) print line
-              close("/tmp/signing_config.txt")
-            }
-            { print }
-            /getByName\("release"\)[[:space:]]*\{/ {
-              print "            signingConfig = signingConfigs.getByName(\"release\")"
-            }
-          ' build.gradle.kts > build.gradle.kts.new
-          mv build.gradle.kts.new build.gradle.kts
+      - name: Configure Android signing
+        uses: ./.github/actions/configure-android-signing
+        with:
+          key-alias: ${{ secrets.ANDROID_KEY_ALIAS }}
+          key-password: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          keystore-base64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
 
       - name: Build Android APK (arm64 only, signed)
         run: npx tauri android build --apk --target aarch64
@@ -118,20 +74,23 @@ jobs:
           VERSION="${{ steps.version.outputs.version }}"
           mkdir -p dev-artifacts
           cp src-tauri/gen/android/app/build/outputs/apk/universal/release/*.apk dev-artifacts/ka-cityrail-navigator-${VERSION}-pre_dev.apk
+          sha256sum dev-artifacts/*.apk > dev-artifacts/SHA256SUMS
 
       - name: Upload APK artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: dev-build-${{ steps.version.outputs.version }}-pre_dev
-          path: dev-artifacts/*.apk
+          path: dev-artifacts/*
           retention-days: 30
 
       - name: Create or update pre-release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@de2c0eb89ae2a093876385947365aca7b0e5f844
         with:
           tag_name: v${{ steps.version.outputs.version }}-pre_dev
           name: Pre-release v${{ steps.version.outputs.version }}-pre_dev
-          files: dev-artifacts/*.apk
+          files: |
+            dev-artifacts/*.apk
+            dev-artifacts/SHA256SUMS
           prerelease: true
           generate_release_notes: false
           body: |
