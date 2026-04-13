@@ -1,14 +1,15 @@
 mod db;
 mod schema;
 
-use std::sync::Mutex;
-use db::{establish_connection, list_stops, upsert_stop, upsert_stops, NewStop, Stop,
-         list_networks, upsert_network, delete_network, Network, NewNetwork};
+use db::{
+    delete_network, establish_connection, list_networks, list_stops, upsert_network, upsert_stop,
+    upsert_stops, Network, NewNetwork, NewStop, Stop,
+};
+use diesel::prelude::*;
 use diesel::sqlite::SqliteConnection;
 use serde::Serialize;
-use diesel::prelude::*;
 use serde_json::Value;
-#[cfg(target_os = "android")]
+use std::sync::Mutex;
 use tauri::Manager;
 
 // ── Build-time API base URLs (override via .env at compile time) ──────────────
@@ -97,17 +98,15 @@ fn json_to_i64(v: &Value) -> i64 {
 }
 
 fn attr_value(obj: &Value, name: &str) -> Option<String> {
-    obj["attrs"]
-        .as_array()
-        .and_then(|attrs| {
-            attrs.iter().find_map(|a| {
-                if a["name"].as_str() == Some(name) {
-                    a["value"].as_str().map(|v| v.to_string())
-                } else {
-                    None
-                }
-            })
+    obj["attrs"].as_array().and_then(|attrs| {
+        attrs.iter().find_map(|a| {
+            if a["name"].as_str() == Some(name) {
+                a["value"].as_str().map(|v| v.to_string())
+            } else {
+                None
+            }
         })
+    })
 }
 
 /// KVV `RealtimeTripId` often embeds a numeric trip token after `T0.` (e.g. `...T0.1385...`).
@@ -127,7 +126,9 @@ fn trip_code_from_realtime_trip_id(id: &str) -> Option<String> {
 fn get_db_path(app: &tauri::AppHandle) -> String {
     #[cfg(target_os = "android")]
     {
-        let app_data_dir = app.path().app_data_dir()
+        let app_data_dir = app
+            .path()
+            .app_data_dir()
             .expect("Failed to resolve Android app data directory");
         std::fs::create_dir_all(&app_data_dir)
             .expect("Failed to create Android app data directory");
@@ -136,8 +137,7 @@ fn get_db_path(app: &tauri::AppHandle) -> String {
 
     #[cfg(not(target_os = "android"))]
     {
-        let data_dir = dirs::data_local_dir()
-            .unwrap_or_else(|| std::path::PathBuf::from("."));
+        let data_dir = dirs::data_local_dir().unwrap_or_else(|| std::path::PathBuf::from("."));
         let app_dir = data_dir.join("ka-cityrail-navigator");
         std::fs::create_dir_all(&app_dir).ok();
         let _ = app;
@@ -174,10 +174,23 @@ fn fetch_stop(stop_id: &str) -> Result<Stop, String> {
     let coords = point["ref"]["coords"].as_str().ok_or("missing coords")?;
 
     let mut parts = coords.split(',');
-    let longitude: f64 = parts.next().ok_or("missing lon")?.parse().map_err(|e: std::num::ParseFloatError| e.to_string())?;
-    let latitude: f64 = parts.next().ok_or("missing lat")?.parse().map_err(|e: std::num::ParseFloatError| e.to_string())?;
+    let longitude: f64 = parts
+        .next()
+        .ok_or("missing lon")?
+        .parse()
+        .map_err(|e: std::num::ParseFloatError| e.to_string())?;
+    let latitude: f64 = parts
+        .next()
+        .ok_or("missing lat")?
+        .parse()
+        .map_err(|e: std::num::ParseFloatError| e.to_string())?;
 
-    Ok(Stop { id, name, longitude, latitude })
+    Ok(Stop {
+        id,
+        name,
+        longitude,
+        latitude,
+    })
 }
 
 /// Fetch departures for a given stop ID from the KVV real-time API.
@@ -203,7 +216,11 @@ fn fetch_departures(stop_id: String) -> Result<Vec<Departure>, String> {
     for d in list {
         let sl = &d["servingLine"];
         let dt = &d["dateTime"];
-        let rdt = if d["realDateTime"].is_object() { &d["realDateTime"] } else { dt };
+        let rdt = if d["realDateTime"].is_object() {
+            &d["realDateTime"]
+        } else {
+            dt
+        };
         let platform = match &d["platform"] {
             Value::String(s) => s.clone(),
             Value::Number(n) => n.to_string(),
@@ -278,8 +295,12 @@ fn fetch_trip_stopseq(
         .text()
         .map_err(|e| e.to_string())?;
 
-    let start = raw.find('(').ok_or("unexpected JSONP format: missing '('")?;
-    let end = raw.rfind(')').ok_or("unexpected JSONP format: missing ')'")?;
+    let start = raw
+        .find('(')
+        .ok_or("unexpected JSONP format: missing '('")?;
+    let end = raw
+        .rfind(')')
+        .ok_or("unexpected JSONP format: missing ')'")?;
     let json_str = raw[start + 1..end].trim();
     let resp: Value = serde_json::from_str(json_str).map_err(|e| e.to_string())?;
 
@@ -320,7 +341,9 @@ fn fetch_trip_stopseq(
         });
     }
 
-    let raw_path = resp["stopSeqCoords"]["coords"]["path"].as_str().unwrap_or("");
+    let raw_path = resp["stopSeqCoords"]["coords"]["path"]
+        .as_str()
+        .unwrap_or("");
     let trimmed_path = trim_path_to_last_stop(raw_path, &route_stops);
 
     Ok(TripStopSeqResponse {
@@ -364,7 +387,6 @@ fn trim_path_to_last_stop(raw_path: &str, stops: &[TripRouteStop]) -> String {
     pairs[..=best_idx].join(" ")
 }
 
-
 /// Search for stops by name using the KVV StopFinder API.
 /// Returns stops matching the query (not persisted to DB).
 #[tauri::command]
@@ -393,25 +415,43 @@ fn search_stops(query: String) -> Result<Vec<Stop>, String> {
     let mut stops = Vec::new();
     for p in points {
         // KVV stopfinder returns type "any" for stops; skip non-object entries
-        if !p.is_object() { continue; }
-        let name = match p["name"].as_str() { Some(s) => s.to_string(), None => continue };
-        let id   = match p["ref"]["id"].as_str() { Some(s) => s.to_string(), None => continue };
-        let coords = match p["ref"]["coords"].as_str() { Some(s) => s, None => continue };
+        if !p.is_object() {
+            continue;
+        }
+        let name = match p["name"].as_str() {
+            Some(s) => s.to_string(),
+            None => continue,
+        };
+        let id = match p["ref"]["id"].as_str() {
+            Some(s) => s.to_string(),
+            None => continue,
+        };
+        let coords = match p["ref"]["coords"].as_str() {
+            Some(s) => s,
+            None => continue,
+        };
         let mut parts = coords.split(',');
-        let longitude: f64 = match parts.next().and_then(|s| s.parse().ok()) { Some(v) => v, None => continue };
-        let latitude:  f64 = match parts.next().and_then(|s| s.parse().ok()) { Some(v) => v, None => continue };
-        stops.push(Stop { id, name, longitude, latitude });
+        let longitude: f64 = match parts.next().and_then(|s| s.parse().ok()) {
+            Some(v) => v,
+            None => continue,
+        };
+        let latitude: f64 = match parts.next().and_then(|s| s.parse().ok()) {
+            Some(v) => v,
+            None => continue,
+        };
+        stops.push(Stop {
+            id,
+            name,
+            longitude,
+            latitude,
+        });
     }
     Ok(stops)
 }
 
-
 /// Search the local DB for stops whose name contains the query string.
 #[tauri::command]
-fn search_stops_db(
-    state: tauri::State<DbState>,
-    query: String,
-) -> Result<Vec<Stop>, String> {
+fn search_stops_db(state: tauri::State<DbState>, query: String) -> Result<Vec<Stop>, String> {
     use crate::schema::stops;
     let pattern = format!("%{}%", query);
     let mut conn = state.0.lock().map_err(|e| e.to_string())?;
@@ -425,14 +465,19 @@ fn search_stops_db(
 /// Fetch a single stop by ID from the KVV API and persist it to the local DB.
 /// Utility/admin command — not called from the main UI.
 #[tauri::command]
-fn fetch_and_store_stop(
-    state: tauri::State<DbState>,
-    stop_id: String,
-) -> Result<Stop, String> {
+fn fetch_and_store_stop(state: tauri::State<DbState>, stop_id: String) -> Result<Stop, String> {
     let stop = fetch_stop(&stop_id)?;
     let mut conn = state.0.lock().map_err(|e| e.to_string())?;
-    upsert_stop(&mut conn, NewStop { id: &stop.id, name: &stop.name, longitude: stop.longitude, latitude: stop.latitude })
-        .map_err(|e| e.to_string())?;
+    upsert_stop(
+        &mut conn,
+        NewStop {
+            id: &stop.id,
+            name: &stop.name,
+            longitude: stop.longitude,
+            latitude: stop.latitude,
+        },
+    )
+    .map_err(|e| e.to_string())?;
     Ok(stop)
 }
 
@@ -449,8 +494,16 @@ fn fetch_and_store_stops(
         .map(|id| {
             let stop = fetch_stop(id)?;
             let mut conn = state.0.lock().map_err(|e| e.to_string())?;
-            upsert_stop(&mut conn, NewStop { id: &stop.id, name: &stop.name, longitude: stop.longitude, latitude: stop.latitude })
-                .map_err(|e| e.to_string())?;
+            upsert_stop(
+                &mut conn,
+                NewStop {
+                    id: &stop.id,
+                    name: &stop.name,
+                    longitude: stop.longitude,
+                    latitude: stop.latitude,
+                },
+            )
+            .map_err(|e| e.to_string())?;
             Ok(stop)
         })
         .collect()
@@ -510,7 +563,11 @@ fn fetch_stops_in_bounds(
     fetch_stops_in_bounds_inner(&state, &bounds_lu, &bounds_rl)
 }
 
-fn fetch_stops_in_bounds_inner(state: &tauri::State<DbState>, bounds_lu: &str, bounds_rl: &str) -> Result<Vec<Stop>, String> {
+fn fetch_stops_in_bounds_inner(
+    state: &tauri::State<DbState>,
+    bounds_lu: &str,
+    bounds_rl: &str,
+) -> Result<Vec<Stop>, String> {
     let url = format!(
         "{KVV_COORD_BASE}?action=XSLT_COORD_REQUEST\
 &jsonp=jsonpFn1&boundingBox=\
@@ -545,7 +602,9 @@ fn fetch_stops_in_bounds_inner(state: &tauri::State<DbState>, bounds_lu: &str, b
         let name = pin["attrs"]
             .as_array()
             .and_then(|attrs| {
-                attrs.iter().find(|a| a["name"] == "STOP_NAME_WITH_PLACE")
+                attrs
+                    .iter()
+                    .find(|a| a["name"] == "STOP_NAME_WITH_PLACE")
                     .and_then(|a| a["value"].as_str())
                     .map(|s| s.to_string())
             })
@@ -566,12 +625,22 @@ fn fetch_stops_in_bounds_inner(state: &tauri::State<DbState>, bounds_lu: &str, b
             None => continue,
         };
 
-        stops.push(Stop { id, name, longitude, latitude });
+        stops.push(Stop {
+            id,
+            name,
+            longitude,
+            latitude,
+        });
     }
 
     let new_stops: Vec<NewStop> = stops
         .iter()
-        .map(|s| NewStop { id: &s.id, name: &s.name, longitude: s.longitude, latitude: s.latitude })
+        .map(|s| NewStop {
+            id: &s.id,
+            name: &s.name,
+            longitude: s.longitude,
+            latitude: s.latitude,
+        })
         .collect();
 
     let mut conn = state.0.lock().map_err(|e| e.to_string())?;
@@ -592,19 +661,31 @@ fn pin_stop_to_network(
     longitude: f64,
     latitude: f64,
 ) -> Result<(), String> {
-    use crate::schema::{stops, network_stops};
+    use crate::schema::{network_stops, stops};
     let mut conn = state.0.lock().map_err(|e| e.to_string())?;
     // Ensure stop exists
     diesel::insert_into(stops::table)
-        .values(NewStop { id: &stop_id, name: &stop_name, longitude, latitude })
+        .values(NewStop {
+            id: &stop_id,
+            name: &stop_name,
+            longitude,
+            latitude,
+        })
         .on_conflict(stops::id)
         .do_update()
-        .set((stops::name.eq(&stop_name), stops::longitude.eq(longitude), stops::latitude.eq(latitude)))
+        .set((
+            stops::name.eq(&stop_name),
+            stops::longitude.eq(longitude),
+            stops::latitude.eq(latitude),
+        ))
         .execute(&mut *conn)
         .map_err(|e| e.to_string())?;
     // Pin
     diesel::insert_into(network_stops::table)
-        .values((network_stops::network_ssid.eq(&ssid), network_stops::stop_id.eq(&stop_id)))
+        .values((
+            network_stops::network_ssid.eq(&ssid),
+            network_stops::stop_id.eq(&stop_id),
+        ))
         .on_conflict_do_nothing()
         .execute(&mut *conn)
         .map(|_| ())
@@ -632,11 +713,8 @@ fn unpin_stop_from_network(
 
 /// Get all stops pinned to a specific network.
 #[tauri::command]
-fn get_network_stops(
-    state: tauri::State<DbState>,
-    ssid: String,
-) -> Result<Vec<Stop>, String> {
-    use crate::schema::{stops, network_stops};
+fn get_network_stops(state: tauri::State<DbState>, ssid: String) -> Result<Vec<Stop>, String> {
+    use crate::schema::{network_stops, stops};
     let mut conn = state.0.lock().map_err(|e| e.to_string())?;
     network_stops::table
         .filter(network_stops::network_ssid.eq(&ssid))
@@ -666,15 +744,22 @@ fn get_current_connection() -> Option<ConnectionInfo> {
         let stdout = String::from_utf8_lossy(&output.stdout);
         for line in stdout.lines() {
             let parts: Vec<&str> = line.splitn(3, ':').collect();
-            if parts.len() != 3 || parts[0] != "yes" { continue; }
+            if parts.len() != 3 || parts[0] != "yes" {
+                continue;
+            }
             let name = parts[1].trim().to_string();
             let conn_type = match parts[2].trim() {
                 "802-11-wireless" => "wifi",
-                "802-3-ethernet"  => "ethernet",
+                "802-3-ethernet" => "ethernet",
                 _ => continue,
             };
-            if name.is_empty() { continue; }
-            return Some(ConnectionInfo { name, conn_type: conn_type.to_string() });
+            if name.is_empty() {
+                continue;
+            }
+            return Some(ConnectionInfo {
+                name,
+                conn_type: conn_type.to_string(),
+            });
         }
         None
     }
@@ -689,7 +774,9 @@ pub struct ConnectionInfo {
 /// Check if the active connection matches a saved network.
 #[tauri::command]
 fn check_current_network(state: tauri::State<DbState>) -> Result<Option<Network>, String> {
-    let Some(connection_info) = get_current_connection() else { return Ok(None) };
+    let Some(connection_info) = get_current_connection() else {
+        return Ok(None);
+    };
     use crate::schema::networks;
     let mut conn = state.0.lock().map_err(|e| e.to_string())?;
     networks::table
@@ -708,15 +795,23 @@ fn get_networks(state: tauri::State<DbState>) -> Result<Vec<Network>, String> {
 #[tauri::command]
 fn add_network(state: tauri::State<DbState>, ssid: String, label: String) -> Result<(), String> {
     let mut conn = state.0.lock().map_err(|e| e.to_string())?;
-    upsert_network(&mut conn, NewNetwork { ssid: &ssid, label: &label })
-        .map(|_| ())
-        .map_err(|e| e.to_string())
+    upsert_network(
+        &mut conn,
+        NewNetwork {
+            ssid: &ssid,
+            label: &label,
+        },
+    )
+    .map(|_| ())
+    .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 fn remove_network(state: tauri::State<DbState>, ssid: String) -> Result<(), String> {
     let mut conn = state.0.lock().map_err(|e| e.to_string())?;
-    delete_network(&mut conn, &ssid).map(|_| ()).map_err(|e| e.to_string())
+    delete_network(&mut conn, &ssid)
+        .map(|_| ())
+        .map_err(|e| e.to_string())
 }
 
 // ── App entry point ───────────────────────────────────────────────────────────
@@ -733,11 +828,23 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            fetch_and_store_stop, fetch_and_store_stops, fetch_stops_in_bounds,
-            fetch_stops_near, get_stops, fetch_departures, search_stops, search_stops_db,
+            fetch_and_store_stop,
+            fetch_and_store_stops,
+            fetch_stops_in_bounds,
+            fetch_stops_near,
+            get_stops,
+            fetch_departures,
+            search_stops,
+            search_stops_db,
             fetch_trip_stopseq,
-            get_current_connection, check_current_network, get_networks, add_network, remove_network,
-            pin_stop_to_network, unpin_stop_from_network, get_network_stops
+            get_current_connection,
+            check_current_network,
+            get_networks,
+            add_network,
+            remove_network,
+            pin_stop_to_network,
+            unpin_stop_from_network,
+            get_network_stops
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

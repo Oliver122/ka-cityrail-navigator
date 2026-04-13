@@ -55,6 +55,8 @@ jobs:
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
+        with:
+          toolchain: stable
 
       - name: Install JavaScript dependencies
         run: npm ci
@@ -66,4 +68,4 @@ jobs:
         run: cargo install cargo-audit --locked
 
       - name: Cargo audit
-        run: cargo audit
+        run: cargo audit --file src-tauri/Cargo.lock
