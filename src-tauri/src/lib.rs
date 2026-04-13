@@ -732,6 +732,55 @@ fn get_network_stops(state: tauri::State<DbState>, ssid: String) -> Result<Vec<S
 fn get_current_connection() -> Option<ConnectionInfo> {
     #[cfg(target_os = "android")]
     {
+        fn normalize_android_ssid(raw: &str) -> Option<String> {
+            let trimmed = raw.trim().trim_matches('"').trim();
+            if trimmed.is_empty() {
+                return None;
+            }
+            let lower = trimmed.to_ascii_lowercase();
+            if lower == "<unknown ssid>" || lower == "unknown ssid" || lower == "n/a" {
+                return None;
+            }
+            Some(trimmed.to_string())
+        }
+
+        fn extract_ssid(output: &str) -> Option<String> {
+            for line in output.lines() {
+                let trimmed = line.trim();
+                if let Some((key, value)) = trimmed.split_once(':') {
+                    let key = key.trim().to_ascii_lowercase();
+                    if key == "ssid" {
+                        return normalize_android_ssid(value);
+                    }
+                }
+
+                // Fallback for lines like: "SSID \"MyWifi\""
+                let upper = trimmed.to_ascii_uppercase();
+                if upper.starts_with("SSID ") {
+                    return normalize_android_ssid(trimmed[5..].trim());
+                }
+            }
+            None
+        }
+
+        let commands: [(&str, &[&str]); 2] = [("cmd", &["wifi", "status"]), ("dumpsys", &["wifi"])];
+
+        for (bin, args) in commands {
+            let Ok(output) = std::process::Command::new(bin).args(args).output() else {
+                continue;
+            };
+            if !output.status.success() {
+                continue;
+            }
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            if let Some(ssid) = extract_ssid(&stdout) {
+                return Some(ConnectionInfo {
+                    name: ssid,
+                    conn_type: "wifi".to_string(),
+                });
+            }
+        }
+
         return None;
     }
 
