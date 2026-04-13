@@ -68,4 +68,4 @@ jobs:
         run: cargo install cargo-audit --locked
 
       - name: Cargo audit
-        run: cargo audit
+        run: cargo audit --file src-tauri/Cargo.lock

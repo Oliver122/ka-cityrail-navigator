@@ -10,7 +10,6 @@ use diesel::sqlite::SqliteConnection;
 use serde::Serialize;
 use serde_json::Value;
 use std::sync::Mutex;
-#[cfg(target_os = "android")]
 use tauri::Manager;
 
 // ── Build-time API base URLs (override via .env at compile time) ──────────────
