@@ -152,17 +152,18 @@ src-tauri/
 
 | Workflow | Trigger | What it does |
 |----------|---------|--------------|
-| **PR Validation** | Pull request to `development` or `main` | Validates the build compiles — builds frontend + Android APK (aarch64 debug) to catch errors early |
-| **Dev Build** | Push to `development` | Builds debug APK versioned as `x.x.x-pre_dev`, uploads artifact (30-day retention), creates/updates a GitHub pre-release |
-| **Release Build** | Push to `main` | Auto-bumps version based on branch/commit convention, builds debug APK, uploads artifact (90-day retention), creates git tag + GitHub Release with APK attached |
+| **PR Validation** | Pull request to `development` or `main` | Builds frontend, runs Rust format/lint/tests, then builds Android APK (aarch64) |
+| **Dev Build** | Push to `development` | Builds signed arm64 APK versioned as `x.x.x-pre_dev`, uploads APK + SHA256 checksums (30-day retention), creates/updates GitHub pre-release |
+| **Release Build** | Push to `main` | Auto-bumps version from commit semantics, builds signed AAB/APK in parallel, publishes release assets + checksums, optionally uploads AAB to Play Store |
+| **Security Scans** | PR/push to `development` or `main`, weekly schedule, manual | Runs CodeQL (JS + Rust) and dependency audits (`npm audit`, `cargo audit`) |
 
 ### Versioning Convention
 
-Branch prefixes determine the version bump (on merge to `main`):
-- `feat/` or `[feat]` in commit → **minor** (0.**1**.0)
-- `fix/` or `[fix]` in commit → **patch** (0.0.**1**)
-- `bc/` / `breaking-change/` or `[breaking]` → **major** (**1**.0.0)
-- Anything else → defaults to **patch**
+Version bump on `main` push is derived from commit semantics since last tag:
+- `BREAKING CHANGE` footer or `type!:` commit subject → **major** (**1**.0.0)
+- `feat:` (or merged `feat/` PR) → **minor** (0.**1**.0)
+- all other code changes → **patch** (0.0.**1**)
+- CI/docs-only changes (`.github/`, `*.md`, `LICENSE`) → no bump / no build
 
 ---
 

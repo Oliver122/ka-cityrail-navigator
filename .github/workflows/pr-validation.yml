@@ -3,6 +3,13 @@ name: PR Validation
 on:
   pull_request:
     branches: [development, main]
+    paths-ignore:
+      - '**/*.md'
+      - 'LICENSE'
+
+concurrency:
+  group: pr-validation-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
 
 env:
   CARGO_TERM_COLOR: always
@@ -10,10 +17,12 @@ env:
 jobs:
   validate:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
 
       - name: Setup build environment
         uses: ./.github/actions/setup-environment
@@ -23,6 +32,15 @@ jobs:
 
       - name: Build frontend
         run: npm run build
+
+      - name: Rust formatting check
+        run: cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
+
+      - name: Rust lint check
+        run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings
+
+      - name: Rust tests
+        run: cargo test --manifest-path src-tauri/Cargo.toml --all-features
 
       - name: Initialize Android project
         run: npx tauri android init
