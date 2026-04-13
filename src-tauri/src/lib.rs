@@ -8,6 +8,8 @@ use diesel::sqlite::SqliteConnection;
 use serde::Serialize;
 use diesel::prelude::*;
 use serde_json::Value;
+#[cfg(target_os = "android")]
+use tauri::Manager;
 
 // ── Build-time API base URLs (override via .env at compile time) ──────────────
 
@@ -122,12 +124,25 @@ fn trip_code_from_realtime_trip_id(id: &str) -> Option<String> {
     Some(rest[..end].to_string())
 }
 
-fn get_db_path() -> String {
-    let data_dir = dirs::data_local_dir()
-        .unwrap_or_else(|| std::path::PathBuf::from("."));
-    let app_dir = data_dir.join("ka-cityrail-navigator");
-    std::fs::create_dir_all(&app_dir).ok();
-    app_dir.join("stops.db").to_string_lossy().to_string()
+fn get_db_path(app: &tauri::AppHandle) -> String {
+    #[cfg(target_os = "android")]
+    {
+        let app_data_dir = app.path().app_data_dir()
+            .expect("Failed to resolve Android app data directory");
+        std::fs::create_dir_all(&app_data_dir)
+            .expect("Failed to create Android app data directory");
+        return app_data_dir.join("stops.db").to_string_lossy().to_string();
+    }
+
+    #[cfg(not(target_os = "android"))]
+    {
+        let data_dir = dirs::data_local_dir()
+            .unwrap_or_else(|| std::path::PathBuf::from("."));
+        let app_dir = data_dir.join("ka-cityrail-navigator");
+        std::fs::create_dir_all(&app_dir).ok();
+        let _ = app;
+        app_dir.join("stops.db").to_string_lossy().to_string()
+    }
 }
 
 // ── Shared helpers ────────────────────────────────────────────────────────────
@@ -637,24 +652,32 @@ fn get_network_stops(
 /// Returns None for loopback, mobile or unknown types.
 #[tauri::command]
 fn get_current_connection() -> Option<ConnectionInfo> {
-    let output = std::process::Command::new("nmcli")
-        .args(["-t", "-f", "active,name,type", "con", "show", "--active"])
-        .output()
-        .ok()?;
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    for line in stdout.lines() {
-        let parts: Vec<&str> = line.splitn(3, ':').collect();
-        if parts.len() != 3 || parts[0] != "yes" { continue; }
-        let name = parts[1].trim().to_string();
-        let conn_type = match parts[2].trim() {
-            "802-11-wireless" => "wifi",
-            "802-3-ethernet"  => "ethernet",
-            _ => continue,
-        };
-        if name.is_empty() { continue; }
-        return Some(ConnectionInfo { name, conn_type: conn_type.to_string() });
+    #[cfg(target_os = "android")]
+    {
+        return None;
     }
-    None
+
+    #[cfg(not(target_os = "android"))]
+    {
+        let output = std::process::Command::new("nmcli")
+            .args(["-t", "-f", "active,name,type", "con", "show", "--active"])
+            .output()
+            .ok()?;
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        for line in stdout.lines() {
+            let parts: Vec<&str> = line.splitn(3, ':').collect();
+            if parts.len() != 3 || parts[0] != "yes" { continue; }
+            let name = parts[1].trim().to_string();
+            let conn_type = match parts[2].trim() {
+                "802-11-wireless" => "wifi",
+                "802-3-ethernet"  => "ethernet",
+                _ => continue,
+            };
+            if name.is_empty() { continue; }
+            return Some(ConnectionInfo { name, conn_type: conn_type.to_string() });
+        }
+        None
+    }
 }
 
 #[derive(Serialize, Debug, Clone)]
@@ -700,13 +723,15 @@ fn remove_network(state: tauri::State<DbState>, ssid: String) -> Result<(), Stri
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let db_path = get_db_path();
-    let conn = establish_connection(&db_path);
-
     tauri::Builder::default()
         .plugin(tauri_plugin_geolocation::init())
         .plugin(tauri_plugin_opener::init())
-        .manage(DbState(Mutex::new(conn)))
+        .setup(|app| {
+            let db_path = get_db_path(app.handle());
+            let conn = establish_connection(&db_path);
+            app.manage(DbState(Mutex::new(conn)));
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             fetch_and_store_stop, fetch_and_store_stops, fetch_stops_in_bounds,
             fetch_stops_near, get_stops, fetch_departures, search_stops, search_stops_db,
