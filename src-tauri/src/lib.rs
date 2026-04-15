@@ -84,6 +84,23 @@ struct DbState(Mutex<SqliteConnection>);
 
 // ── KVV DM helper ──────────────────────────────────────────────────────────────
 
+/// Shorten verbose line numbers like "ICE 372 InterCityExpress" → "ICE 372".
+/// Keeps the prefix (ICE/IC/EC/TGV/RJ/…) plus the train number, drops the rest.
+fn shorten_line_number(raw: &str) -> String {
+    let prefixes = ["ICE", "IC", "EC", "TGV", "RJX", "RJ", "EN", "NJ", "FLX", "THA"];
+    for pfx in prefixes {
+        if raw.starts_with(pfx) {
+            let rest = raw[pfx.len()..].trim_start();
+            let num_end = rest.find(|c: char| !c.is_ascii_digit()).unwrap_or(rest.len());
+            if num_end > 0 {
+                return format!("{pfx} {}", &rest[..num_end]);
+            }
+            return pfx.to_string();
+        }
+    }
+    raw.to_string()
+}
+
 fn parse_time_field(h: &Value, m: &Value) -> String {
     let hh = h.as_str().unwrap_or("0");
     let mm = m.as_str().unwrap_or("0");
@@ -236,7 +253,7 @@ fn fetch_departures(stop_id: String) -> Result<Vec<Departure>, String> {
         departures.push(Departure {
             stop_name: d["stopName"].as_str().unwrap_or("").to_string(),
             stop_id: d["stopID"].as_str().unwrap_or(&stop_id).to_string(),
-            line: sl["number"].as_str().unwrap_or("").to_string(),
+            line: shorten_line_number(sl["number"].as_str().unwrap_or("")),
             line_type: sl["name"].as_str().unwrap_or("").to_string(),
             mot_type: sl["motType"].as_str().unwrap_or("").to_string(),
             direction: sl["direction"].as_str().unwrap_or("").to_string(),
