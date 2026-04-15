@@ -91,8 +91,8 @@ fn shorten_line_number(raw: &str) -> String {
         "ICE", "IC", "EC", "TGV", "RJX", "RJ", "EN", "NJ", "FLX", "THA",
     ];
     for pfx in prefixes {
-        if raw.starts_with(pfx) {
-            let rest = raw[pfx.len()..].trim_start();
+        if let Some(after) = raw.strip_prefix(pfx) {
+            let rest = after.trim_start();
             let num_end = rest
                 .find(|c: char| !c.is_ascii_digit())
                 .unwrap_or(rest.len());
