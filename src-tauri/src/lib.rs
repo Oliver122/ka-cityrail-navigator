@@ -87,11 +87,15 @@ struct DbState(Mutex<SqliteConnection>);
 /// Shorten verbose line numbers like "ICE 372 InterCityExpress" → "ICE 372".
 /// Keeps the prefix (ICE/IC/EC/TGV/RJ/…) plus the train number, drops the rest.
 fn shorten_line_number(raw: &str) -> String {
-    let prefixes = ["ICE", "IC", "EC", "TGV", "RJX", "RJ", "EN", "NJ", "FLX", "THA"];
+    let prefixes = [
+        "ICE", "IC", "EC", "TGV", "RJX", "RJ", "EN", "NJ", "FLX", "THA",
+    ];
     for pfx in prefixes {
         if raw.starts_with(pfx) {
             let rest = raw[pfx.len()..].trim_start();
-            let num_end = rest.find(|c: char| !c.is_ascii_digit()).unwrap_or(rest.len());
+            let num_end = rest
+                .find(|c: char| !c.is_ascii_digit())
+                .unwrap_or(rest.len());
             if num_end > 0 {
                 return format!("{pfx} {}", &rest[..num_end]);
             }
