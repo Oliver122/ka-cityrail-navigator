@@ -1,5 +1,6 @@
-import { ChevronLeftIcon, ShareIcon, MenuIcon, AlertIcon, MapIcon } from "./components/Icons";
+import { ChevronLeftIcon, ShareIcon, MenuIcon, AlertIcon } from "./components/Icons";
 import LineBadge from "./components/LineBadge";
+import RouteMap from "./components/RouteMap";
 import type { DepartureDetail, RouteStop } from "./types";
 import "./DepartureDetails.css";
 
@@ -24,9 +25,9 @@ function RouteTimeline({ stops }: { stops: RouteStop[] }) {
               {stop.platform && <span className="timeline-platform">Gl. {stop.platform}</span>}
             </div>
             <div className="timeline-time">
-              {stop.arrivalTime && (
+              {(stop.arrivalTime || stop.departureTime) && (
                 <span className={stop.delayMinutes && stop.delayMinutes > 0 ? "time-delayed" : ""}>
-                  {stop.arrivalTime}
+                  {stop.arrivalTime || stop.departureTime}
                   {stop.delayMinutes && stop.delayMinutes > 0 && (
                     <span className="delay-badge">+{stop.delayMinutes}</span>
                   )}
@@ -109,11 +110,17 @@ export default function DepartureDetails({ departure, onBack }: Props) {
         <RouteTimeline stops={departure.routeStops} />
       </div>
 
-      {/* Map Button */}
-      <button className="map-button">
-        <MapIcon />
-        <span>View Full Route Map</span>
-      </button>
+      {/* Route Map */}
+      {departure.routeStops.length > 0 && departure.routeStops.some(s => s.latitude != null) && (
+        <div className="details-card route-map-card">
+          <h2 className="card-title">Route Map</h2>
+          <RouteMap
+            routeStops={departure.routeStops}
+            routePath={departure.routePath}
+            currentStopName={departure.stopName}
+          />
+        </div>
+      )}
     </main>
   );
 }

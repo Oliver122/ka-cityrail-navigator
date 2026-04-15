@@ -35,6 +35,7 @@ interface NetworkInfo {
 
 interface Departure {
   stop_name: string;
+  stop_id: string;
   line: string;
   line_type: string;
   mot_type: string;
@@ -44,6 +45,32 @@ interface Departure {
   real_time: string;
   delay_minutes: number;
   countdown: number;
+  trip_code: string;
+  line_stateless: string;
+  realtime_trip_id: string;
+  avms_trip_id: string;
+  service_date: string;
+  service_time: string;
+}
+
+interface TripRouteStop {
+  id: string;
+  name: string;
+  platform: string;
+  arrival_time: string;
+  departure_time: string;
+  longitude?: number;
+  latitude?: number;
+}
+
+interface TripStopSeqResponse {
+  trip_code: string;
+  line_stateless: string;
+  line_name: string;
+  line_number: string;
+  destination: string;
+  path: string;
+  route_stops: TripRouteStop[];
 }
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -69,6 +96,12 @@ function formatCountdown(countdown: number, realTime: string): { text: string; c
   if (countdown <= 0) return { text: "now", className: "eta-now" };
   if (countdown <= MAX_COUNTDOWN_DISPLAY_MIN) return { text: `${countdown} min`, className: "eta-soon" };
   return { text: realTime, className: "eta-later" };
+}
+
+function kvDateTimeToDisplay(value: string): string {
+  const parts = value.split(" ");
+  if (parts.length < 2) return "";
+  return parts[1].slice(0, 5);
 }
 
 // Create mock route stops for departure details
@@ -98,6 +131,8 @@ function App() {
   const [refreshing, setRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedDeparture, setSelectedDeparture] = useState<DepartureDetail | null>(null);
+  const [routeLoadingId, setRouteLoadingId] = useState<string | null>(null);
+  const [routeLoadError, setRouteLoadError] = useState<string | null>(null);
   const [initialLoading, setInitialLoading] = useState(true);
   
   // Track last fetched bounds to avoid duplicate requests
@@ -189,10 +224,23 @@ function App() {
       });
       setNearbyStops(nearby);
 
-      // Also load departures for starred stops not already in the nearby list
+      // Collect network-pinned stops so their departures are loaded too
+      let netStops: Stop[] = [];
+      try {
+        const net = await invoke<NetworkInfo | null>("check_current_network");
+        if (net) {
+          netStops = await invoke<Stop[]>("get_network_stops", { ssid: net.ssid });
+          setNetworkStops(netStops);
+          setKnownNetwork(net);
+        }
+      } catch { /* network detection is best-effort */ }
+
       const starred = loadStarred();
-      const extraStarred = starred.filter((s) => !nearby.some((n) => n.id === s.id));
-      const all = [...nearby, ...extraStarred];
+      const seenIds = new Set(nearby.map((s) => s.id));
+      const extraStarred = starred.filter((s) => !seenIds.has(s.id));
+      extraStarred.forEach((s) => seenIds.add(s.id));
+      const extraNetwork = netStops.filter((s) => !seenIds.has(s.id));
+      const all = [...nearby, ...extraStarred, ...extraNetwork];
 
       const results = await Promise.all(
         all.map((s) =>
@@ -319,10 +367,13 @@ function App() {
     ...nearbyOnly,
   ]);
 
-  // Handle departure click to show details
-  const handleDepartureClick = (stop: Stop, dep: Departure) => {
-    const detail: DepartureDetail = {
-      id: `${stop.id}-${dep.line}-${dep.planned_time}`,
+  // Handle departure click: load full stop sequence, then open details
+  const handleDepartureClick = async (stop: Stop, dep: Departure) => {
+    const detailId = `${stop.id}-${dep.line}-${dep.planned_time}`;
+    setRouteLoadError(null);
+    setRouteLoadingId(detailId);
+    const detailBase: DepartureDetail = {
+      id: detailId,
       line: dep.line,
       lineType: dep.line_type,
       motType: dep.mot_type,
@@ -333,11 +384,56 @@ function App() {
       delayMinutes: dep.delay_minutes,
       countdown: dep.countdown,
       stopName: stop.name,
-      routeStops: createMockRouteStops(dep, stop.name),
+      tripCode: dep.trip_code,
+      realtimeTripId: dep.realtime_trip_id,
+      lineStateless: dep.line_stateless,
+      routePath: "",
+      routeStops: [],
       disruption: dep.delay_minutes > 5 ? `Delay of ${dep.delay_minutes} minutes due to operational issues` : undefined,
     };
-    setSelectedDeparture(detail);
-    setPage("details");
+    try {
+      const route = await invoke<TripStopSeqResponse>("fetch_trip_stopseq", {
+        stopId: dep.stop_id || stop.id,
+        lineStateless: dep.line_stateless,
+        tripCode: dep.trip_code,
+        serviceDate: dep.service_date,
+        serviceTime: dep.service_time,
+      });
+      const currentStopId = dep.stop_id || stop.id;
+      const hasRouteStops = route.route_stops.length > 0;
+      const detail: DepartureDetail = {
+        ...detailBase,
+        tripCode: route.trip_code || dep.trip_code,
+        lineStateless: route.line_stateless || dep.line_stateless,
+        routePath: route.path,
+        routeStops: hasRouteStops
+          ? route.route_stops.map((s, i) => ({
+              id: s.id || `${i}`,
+              name: s.name,
+              platform: s.platform,
+              arrivalTime: kvDateTimeToDisplay(s.arrival_time),
+              departureTime: kvDateTimeToDisplay(s.departure_time),
+              longitude: s.longitude,
+              latitude: s.latitude,
+              status: s.id === currentStopId ? "current" : i === 0 ? "passed" : "upcoming",
+              delayMinutes: dep.delay_minutes > 0 ? dep.delay_minutes : undefined,
+            }))
+          : createMockRouteStops(dep, stop.name),
+        disruption: hasRouteStops ? detailBase.disruption : "Route data unavailable for this trip.",
+      };
+      setSelectedDeparture(detail);
+      setPage("details");
+    } catch (e) {
+      setRouteLoadError(String(e));
+      setSelectedDeparture({
+        ...detailBase,
+        routeStops: createMockRouteStops(dep, stop.name),
+        disruption: "Could not load full route. Showing fallback data.",
+      });
+      setPage("details");
+    } finally {
+      setRouteLoadingId(null);
+    }
   };
 
   // Handle navigation
@@ -452,6 +548,11 @@ function App() {
               <span>{error}</span>
             </div>
           )}
+          {routeLoadError && (
+            <div className="error-banner">
+              <span>{routeLoadError}</span>
+            </div>
+          )}
 
           {manualMode && (
             <div className="manual-mode-banner">
@@ -518,6 +619,8 @@ function App() {
                             {deps.map((dep, i) => {
                               const eta = formatCountdown(dep.countdown, dep.real_time);
                               const isDelayed = dep.delay_minutes > 0;
+                              const rowId = `${stop.id}-${dep.line}-${dep.planned_time}`;
+                              const isRouteLoading = routeLoadingId === rowId;
                               
                               return (
                                 <div 
@@ -532,7 +635,9 @@ function App() {
                                   <span className="col-platform">{dep.platform || "-"}</span>
                                   <span className="col-scheduled">{dep.planned_time}</span>
                                   <span className={`col-eta ${isDelayed ? "delayed" : ""}`}>
-                                    {isDelayed ? `+${dep.delay_minutes} min` : eta.text}
+                                    {isRouteLoading
+                                      ? "…"
+                                      : isDelayed ? `+${dep.delay_minutes} min` : eta.text}
                                   </span>
                                 </div>
                               );

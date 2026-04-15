@@ -26,4 +26,3 @@ diesel::table! {
 diesel::joinable!(network_stops -> networks (network_ssid));
 diesel::joinable!(network_stops -> stops (stop_id));
 diesel::allow_tables_to_appear_in_same_query!(stops, networks, network_stops);
-

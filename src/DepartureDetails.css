@@ -14,7 +14,7 @@
   display: flex;
   align-items: center;
   padding: 1rem;
-  padding-top: calc(1rem + env(safe-area-inset-top, 0px));
+  padding-top: calc(1rem + max(1.5rem, env(safe-area-inset-top, 0px)));
   background: #08080f;
   position: sticky;
   top: 0;
@@ -295,30 +295,14 @@
   letter-spacing: 0.02em;
 }
 
-/* Map Button - Primary with Gradient */
-.map-button {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0.75rem;
-  margin: 1rem;
-  padding: 1.125rem;
-  background: linear-gradient(135deg, #a89af8 0%, #3d3870 100%);
-  border: none;
+/* Route Map Card */
+.route-map-card {
+  padding: 1.25rem;
+}
+
+.route-map-card .route-map-container {
+  height: 280px;
+  width: 100%;
   border-radius: 0.75rem;
-  color: #e8e4ff;
-  font-size: 1rem;
-  font-weight: 700;
-  cursor: pointer;
-  transition: transform 0.15s ease-in-out, box-shadow 0.15s ease-in-out;
-}
-
-.map-button:hover {
-  transform: scale(1.02);
-  box-shadow: 0 8px 24px rgba(168, 154, 248, 0.25);
-}
-
-.map-button svg {
-  width: 20px;
-  height: 20px;
+  overflow: hidden;
 }
