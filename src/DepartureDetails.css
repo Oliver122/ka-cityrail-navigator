@@ -14,7 +14,7 @@
   display: flex;
   align-items: center;
   padding: 1rem;
-  padding-top: calc(1rem + env(safe-area-inset-top, 0px));
+  padding-top: calc(1rem + max(1.5rem, env(safe-area-inset-top, 0px)));
   background: #08080f;
   position: sticky;
   top: 0;
