@@ -227,14 +227,12 @@ fn fetch_departures(stop_id: String) -> Result<Vec<Departure>, String> {
             _ => String::new(),
         };
         let realtime_trip_id = attr_value(d, "RealtimeTripId").unwrap_or_default();
-        let mut trip_code = attr_value(sl, "TRIP_CODE")
+        let trip_code = attr_value(sl, "TRIP_CODE")
             .or_else(|| sl["tripCode"].as_str().map(|v| v.to_string()))
+            .or_else(|| sl["key"].as_str().map(|v| v.to_string()))
+            .or_else(|| sl["key"].as_i64().map(|v| v.to_string()))
+            .or_else(|| trip_code_from_realtime_trip_id(&realtime_trip_id))
             .unwrap_or_default();
-        if trip_code.is_empty() {
-            trip_code = trip_code_from_realtime_trip_id(&realtime_trip_id)
-                .or_else(|| sl["key"].as_str().map(|v| v.to_string()))
-                .unwrap_or_default();
-        }
         departures.push(Departure {
             stop_name: d["stopName"].as_str().unwrap_or("").to_string(),
             stop_id: d["stopID"].as_str().unwrap_or(&stop_id).to_string(),

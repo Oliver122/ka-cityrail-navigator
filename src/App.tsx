@@ -400,22 +400,26 @@ function App() {
         serviceTime: dep.service_time,
       });
       const currentStopId = dep.stop_id || stop.id;
+      const hasRouteStops = route.route_stops.length > 0;
       const detail: DepartureDetail = {
         ...detailBase,
         tripCode: route.trip_code || dep.trip_code,
         lineStateless: route.line_stateless || dep.line_stateless,
         routePath: route.path,
-        routeStops: route.route_stops.map((s, i) => ({
-          id: s.id || `${i}`,
-          name: s.name,
-          platform: s.platform,
-          arrivalTime: kvDateTimeToDisplay(s.arrival_time),
-          departureTime: kvDateTimeToDisplay(s.departure_time),
-          longitude: s.longitude,
-          latitude: s.latitude,
-          status: s.id === currentStopId ? "current" : i === 0 ? "passed" : "upcoming",
-          delayMinutes: dep.delay_minutes > 0 ? dep.delay_minutes : undefined,
-        })),
+        routeStops: hasRouteStops
+          ? route.route_stops.map((s, i) => ({
+              id: s.id || `${i}`,
+              name: s.name,
+              platform: s.platform,
+              arrivalTime: kvDateTimeToDisplay(s.arrival_time),
+              departureTime: kvDateTimeToDisplay(s.departure_time),
+              longitude: s.longitude,
+              latitude: s.latitude,
+              status: s.id === currentStopId ? "current" : i === 0 ? "passed" : "upcoming",
+              delayMinutes: dep.delay_minutes > 0 ? dep.delay_minutes : undefined,
+            }))
+          : createMockRouteStops(dep, stop.name),
+        disruption: hasRouteStops ? detailBase.disruption : "Route data unavailable for this trip.",
       };
       setSelectedDeparture(detail);
       setPage("details");
