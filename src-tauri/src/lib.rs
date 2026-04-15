@@ -745,62 +745,115 @@ fn get_network_stops(state: tauri::State<DbState>, ssid: String) -> Result<Vec<S
 
 // ── Network commands ──────────────────────────────────────────────────────────
 
+// ── Android WiFi detection ────────────────────────────────────────────────────
+
+#[cfg(target_os = "android")]
+fn android_detect_wifi() -> Option<ConnectionInfo> {
+    use std::io::Read as _;
+    use std::process::{Command, Stdio};
+
+    fn normalize_ssid(raw: &str) -> Option<String> {
+        let trimmed = raw.trim().trim_matches('"').trim();
+        if trimmed.is_empty() {
+            return None;
+        }
+        let lower = trimmed.to_ascii_lowercase();
+        if lower == "<unknown ssid>" || lower == "unknown ssid" || lower == "n/a" {
+            return None;
+        }
+        Some(trimmed.to_string())
+    }
+
+    /// Spawn a command and read at most `max_bytes` of stdout, then kill it.
+    /// Prevents OOM from commands that dump megabytes (e.g. `dumpsys wifi`).
+    fn run_limited(bin: &str, args: &[&str], max_bytes: usize) -> Option<String> {
+        let mut child = Command::new(bin)
+            .args(args)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .ok()?;
+        let mut stdout = child.stdout.take()?;
+        let mut buf = vec![0u8; max_bytes];
+        let mut filled = 0;
+        while filled < max_bytes {
+            match stdout.read(&mut buf[filled..]) {
+                Ok(0) => break,
+                Ok(n) => filled += n,
+                Err(_) => break,
+            }
+        }
+        drop(stdout);
+        let _ = child.kill();
+        let _ = child.wait();
+        Some(String::from_utf8_lossy(&buf[..filled]).into_owned())
+    }
+
+    fn wifi_from(name: String) -> Option<ConnectionInfo> {
+        Some(ConnectionInfo {
+            name,
+            conn_type: "wifi".to_string(),
+        })
+    }
+
+    // 1) `cmd wifi status` — lightweight, Android 12+ (4 KB is plenty)
+    if let Some(out) = run_limited("cmd", &["wifi", "status"], 4096) {
+        for line in out.lines() {
+            let trimmed = line.trim();
+            if let Some((k, v)) = trimmed.split_once(':') {
+                if k.trim().eq_ignore_ascii_case("ssid") {
+                    if let Some(ssid) = normalize_ssid(v) {
+                        return wifi_from(ssid);
+                    }
+                }
+            }
+        }
+    }
+
+    // 2) `wpa_cli -i wlan0 status` — key=value output, available on many ROMs
+    if let Some(out) = run_limited("wpa_cli", &["-i", "wlan0", "status"], 4096) {
+        for line in out.lines() {
+            if let Some(ssid) = line.strip_prefix("ssid=") {
+                if let Some(name) = normalize_ssid(ssid) {
+                    return wifi_from(name);
+                }
+            }
+        }
+    }
+
+    // 3) `dumpsys wifi` — heavy; cap at 16 KB and look for "mWifiInfo" SSID field
+    if let Some(out) = run_limited("dumpsys", &["wifi"], 16384) {
+        for line in out.lines() {
+            let trimmed = line.trim();
+            if let Some(rest) = trimmed.strip_prefix("SSID:") {
+                let end = rest.find(',').unwrap_or(rest.len());
+                if let Some(ssid) = normalize_ssid(&rest[..end]) {
+                    return wifi_from(ssid);
+                }
+            }
+            // mWifiInfo format: "... SSID: \"MyWifi\", ..."
+            if trimmed.contains("mWifiInfo") {
+                if let Some(pos) = trimmed.find("SSID: ") {
+                    let rest = &trimmed[pos + 6..];
+                    let end = rest.find(',').unwrap_or(rest.len());
+                    if let Some(ssid) = normalize_ssid(&rest[..end]) {
+                        return wifi_from(ssid);
+                    }
+                }
+            }
+        }
+    }
+
+    None
+}
+
 /// Get the active WiFi or wired (ethernet) connection.
 /// Returns None for loopback, mobile or unknown types.
 #[tauri::command]
 fn get_current_connection() -> Option<ConnectionInfo> {
     #[cfg(target_os = "android")]
     {
-        fn normalize_android_ssid(raw: &str) -> Option<String> {
-            let trimmed = raw.trim().trim_matches('"').trim();
-            if trimmed.is_empty() {
-                return None;
-            }
-            let lower = trimmed.to_ascii_lowercase();
-            if lower == "<unknown ssid>" || lower == "unknown ssid" || lower == "n/a" {
-                return None;
-            }
-            Some(trimmed.to_string())
-        }
-
-        fn extract_ssid(output: &str) -> Option<String> {
-            for line in output.lines() {
-                let trimmed = line.trim();
-                if let Some((key, value)) = trimmed.split_once(':') {
-                    let key = key.trim().to_ascii_lowercase();
-                    if key == "ssid" {
-                        return normalize_android_ssid(value);
-                    }
-                }
-
-                // Fallback for lines like: "SSID \"MyWifi\""
-                let upper = trimmed.to_ascii_uppercase();
-                if upper.starts_with("SSID ") {
-                    return normalize_android_ssid(trimmed[5..].trim());
-                }
-            }
-            None
-        }
-
-        let commands: [(&str, &[&str]); 2] = [("cmd", &["wifi", "status"]), ("dumpsys", &["wifi"])];
-
-        for (bin, args) in commands {
-            let Ok(output) = std::process::Command::new(bin).args(args).output() else {
-                continue;
-            };
-            if !output.status.success() {
-                continue;
-            }
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            if let Some(ssid) = extract_ssid(&stdout) {
-                return Some(ConnectionInfo {
-                    name: ssid,
-                    conn_type: "wifi".to_string(),
-                });
-            }
-        }
-
-        return None;
+        return std::panic::catch_unwind(android_detect_wifi).ok().flatten();
     }
 
     #[cfg(not(target_os = "android"))]
