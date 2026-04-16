@@ -2,10 +2,8 @@ name: Release
 
 on:
   push:
-    branches: [main]
-    paths-ignore:
-      - '**/*.md'
-      - 'LICENSE'
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
 
 permissions:
   contents: write
@@ -18,134 +16,61 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  version-and-tag:
+  validate-tag:
     runs-on: ubuntu-latest
     outputs:
-      new-version: ${{ steps.bump.outputs.new_version }}
-      bump-type: ${{ steps.bump.outputs.bump_type }}
-      should-build: ${{ steps.check.outputs.should_build }}
+      version: ${{ steps.parse.outputs.version }}
+      tag: ${{ steps.parse.outputs.tag }}
+
+    steps:
+      - name: Parse version from tag
+        id: parse
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          VERSION="${TAG#v}"
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Release: $TAG (version $VERSION)"
+
+      - name: Checkout repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+
+      - name: Verify version files match tag
+        run: |
+          VERSION="${{ steps.parse.outputs.version }}"
+
+          PKG_VERSION=$(node -p "require('./package.json').version")
+          TAURI_VERSION=$(node -p "require('./src-tauri/tauri.conf.json').version")
+          CARGO_VERSION=$(grep -m1 '^version' src-tauri/Cargo.toml | sed 's/.*"\(.*\)".*/\1/')
+
+          echo "Tag version:   $VERSION"
+          echo "package.json:  $PKG_VERSION"
+          echo "tauri.conf:    $TAURI_VERSION"
+          echo "Cargo.toml:    $CARGO_VERSION"
+
+          MISMATCH=0
+          [ "$PKG_VERSION" != "$VERSION" ] && echo "::error::package.json ($PKG_VERSION) != tag ($VERSION)" && MISMATCH=1
+          [ "$TAURI_VERSION" != "$VERSION" ] && echo "::error::tauri.conf.json ($TAURI_VERSION) != tag ($VERSION)" && MISMATCH=1
+          [ "$CARGO_VERSION" != "$VERSION" ] && echo "::error::Cargo.toml ($CARGO_VERSION) != tag ($VERSION)" && MISMATCH=1
+
+          if [ "$MISMATCH" -eq 1 ]; then
+            echo "::error::Version mismatch! Run 'scripts/sync-version.sh $VERSION' and commit before tagging."
+            exit 1
+          fi
+
+  create-release:
+    needs: validate-tag
+    runs-on: ubuntu-latest
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
-        with:
-          fetch-depth: 0
-          token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Setup Node.js
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
-        with:
-          node-version: '20'
-          cache: 'npm'
-
-      - name: Get latest tag
-        id: get_tag
-        run: |
-          git fetch --tags
-          LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
-          echo "latest=$LATEST_TAG" >> $GITHUB_OUTPUT
-          echo "Latest tag: $LATEST_TAG"
-
-      - name: Determine version bump
-        id: bump
-        run: |
-          LATEST="${{ steps.get_tag.outputs.latest }}"
-          VERSION="${LATEST#v}"
-
-          MAJOR=$(echo "$VERSION" | cut -d. -f1)
-          MINOR=$(echo "$VERSION" | cut -d. -f2)
-          PATCH=$(echo "$VERSION" | cut -d. -f3)
-
-          if git rev-parse "$LATEST" >/dev/null 2>&1; then
-            RANGE="${LATEST}..HEAD"
-            COMMIT_LOG=$(git log "$RANGE" --pretty='%s%n%b')
-            CHANGED_FILES=$(git diff --name-only "$RANGE")
-          else
-            COMMIT_LOG=$(git log --pretty='%s%n%b')
-            CHANGED_FILES=$(git ls-files)
-          fi
-
-          echo "Changed files:"
-          echo "$CHANGED_FILES"
-
-          if [ -z "$CHANGED_FILES" ]; then
-            echo "new_version=$LATEST" >> $GITHUB_OUTPUT
-            echo "bump_type=none" >> $GITHUB_OUTPUT
-            exit 0
-          fi
-
-          if echo "$CHANGED_FILES" | grep -qvE '^(\.github/|.*\.md$|LICENSE$)'; then
-            NON_CICD_CHANGE=true
-          else
-            NON_CICD_CHANGE=false
-          fi
-
-          if [ "$NON_CICD_CHANGE" = "false" ]; then
-            echo "Only CI/docs changes detected - skipping version bump and build"
-            echo "new_version=$LATEST" >> $GITHUB_OUTPUT
-            echo "bump_type=none" >> $GITHUB_OUTPUT
-            exit 0
-          fi
-
-          if echo "$COMMIT_LOG" | grep -qiE 'BREAKING CHANGE|^[^[:space:]]+(\([^)]+\))?!:'; then
-            MAJOR=$((MAJOR + 1))
-            MINOR=0
-            PATCH=0
-            BUMP_TYPE="major"
-          elif echo "$COMMIT_LOG" | grep -qiE '^feat(\([^)]+\))?:|\[feat\]|Merge pull request #[0-9]+ .*feat/'; then
-            MINOR=$((MINOR + 1))
-            PATCH=0
-            BUMP_TYPE="minor"
-          else
-            PATCH=$((PATCH + 1))
-            BUMP_TYPE="patch"
-          fi
-
-          NEW_VERSION="v${MAJOR}.${MINOR}.${PATCH}"
-          echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
-          echo "bump_type=$BUMP_TYPE" >> $GITHUB_OUTPUT
-          echo "New version: $NEW_VERSION ($BUMP_TYPE)"
-
-      - name: Check if should build
-        id: check
-        run: |
-          if [ "${{ steps.bump.outputs.bump_type }}" = "none" ]; then
-            echo "should_build=false" >> $GITHUB_OUTPUT
-          else
-            echo "should_build=true" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Update version files
-        if: steps.check.outputs.should_build == 'true'
-        run: |
-          VERSION="${{ steps.bump.outputs.new_version }}"
-          VERSION="${VERSION#v}"
-
-          npm version "$VERSION" --no-git-tag-version
-          sed -i "s/\"version\": \"[^\"]*\"/\"version\": \"$VERSION\"/" src-tauri/tauri.conf.json
-          sed -i "0,/^version = /s/^version = \"[^\"]*\"/version = \"$VERSION\"/" src-tauri/Cargo.toml
-
-      - name: Commit version bump
-        if: steps.check.outputs.should_build == 'true'
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add package.json package-lock.json src-tauri/tauri.conf.json src-tauri/Cargo.toml
-          git commit -m "chore: bump version to ${{ steps.bump.outputs.new_version }}" || echo "No changes to commit"
-          git push
-
-      - name: Create and push tag
-        if: steps.check.outputs.should_build == 'true'
-        run: |
-          git tag ${{ steps.bump.outputs.new_version }}
-          git push origin ${{ steps.bump.outputs.new_version }}
 
       - name: Create GitHub Release
-        if: steps.check.outputs.should_build == 'true'
         uses: softprops/action-gh-release@de2c0eb89ae2a093876385947365aca7b0e5f844
         with:
-          tag_name: ${{ steps.bump.outputs.new_version }}
-          name: Release ${{ steps.bump.outputs.new_version }}
+          tag_name: ${{ needs.validate-tag.outputs.tag }}
+          name: Release ${{ needs.validate-tag.outputs.tag }}
           generate_release_notes: true
           draft: false
           prerelease: false
@@ -153,8 +78,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   build-release:
-    needs: version-and-tag
-    if: needs.version-and-tag.outputs.should-build == 'true'
+    needs: [validate-tag, create-release]
     runs-on: ubuntu-latest
     environment: Vars
     strategy:
@@ -166,7 +90,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
         with:
-          ref: ${{ needs.version-and-tag.outputs.new-version }}
+          ref: ${{ needs.validate-tag.outputs.tag }}
 
       - name: Setup build environment
         uses: ./.github/actions/setup-environment
@@ -201,7 +125,7 @@ jobs:
 
       - name: Prepare release artifacts
         run: |
-          VERSION="${{ needs.version-and-tag.outputs.new-version }}"
+          VERSION="${{ needs.validate-tag.outputs.tag }}"
           mkdir -p release-artifacts
 
           if [ "${{ matrix.artifact-type }}" = "aab" ]; then
@@ -215,7 +139,7 @@ jobs:
       - name: Upload build artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: release-${{ needs.version-and-tag.outputs.new-version }}-${{ matrix.artifact-type }}
+          name: release-${{ needs.validate-tag.outputs.tag }}-${{ matrix.artifact-type }}
           path: release-artifacts/*
           retention-days: 90
 
@@ -224,21 +148,20 @@ jobs:
         run: rm -f $RUNNER_TEMP/keystore.jks src-tauri/gen/android/keystore.properties
 
   publish-release-assets:
-    needs: [version-and-tag, build-release]
-    if: needs.version-and-tag.outputs.should-build == 'true'
+    needs: [validate-tag, build-release]
     runs-on: ubuntu-latest
 
     steps:
       - name: Download AAB artifact
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
-          name: release-${{ needs.version-and-tag.outputs.new-version }}-aab
+          name: release-${{ needs.validate-tag.outputs.tag }}-aab
           path: release-artifacts
 
       - name: Download APK artifact
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
-          name: release-${{ needs.version-and-tag.outputs.new-version }}-apk
+          name: release-${{ needs.validate-tag.outputs.tag }}-apk
           path: release-artifacts
 
       - name: Create combined checksums
@@ -249,7 +172,7 @@ jobs:
       - name: Upload artifacts to release
         uses: softprops/action-gh-release@de2c0eb89ae2a093876385947365aca7b0e5f844
         with:
-          tag_name: ${{ needs.version-and-tag.outputs.new-version }}
+          tag_name: ${{ needs.validate-tag.outputs.tag }}
           files: |
             release-artifacts/*.aab
             release-artifacts/*.apk
@@ -259,15 +182,15 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   upload-playstore:
-    needs: [version-and-tag, build-release]
+    needs: [validate-tag, build-release]
     runs-on: ubuntu-latest
-    if: needs.version-and-tag.outputs.should-build == 'true' && vars.AUTO_PUBLISH_PLAYSTORE == 'true'
+    if: vars.AUTO_PUBLISH_PLAYSTORE == 'true'
 
     steps:
       - name: Download AAB
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
-          name: release-${{ needs.version-and-tag.outputs.new-version }}-aab
+          name: release-${{ needs.validate-tag.outputs.tag }}-aab
           path: ./
 
       - name: Upload to Play Store
