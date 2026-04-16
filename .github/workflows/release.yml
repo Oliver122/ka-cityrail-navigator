@@ -2,11 +2,14 @@ name: Release
 
 on:
   push:
-    tags:
-      - 'v[0-9]+.[0-9]+.[0-9]+'
+    branches: [main]
+    paths-ignore:
+      - '**/*.md'
+      - 'LICENSE'
 
 permissions:
   contents: write
+  pull-requests: write
 
 concurrency:
   group: release-${{ github.ref }}
@@ -16,69 +19,23 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  validate-tag:
+  release-please:
     runs-on: ubuntu-latest
     outputs:
-      version: ${{ steps.parse.outputs.version }}
-      tag: ${{ steps.parse.outputs.tag }}
-
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
+      version: ${{ steps.release.outputs.major }}.${{ steps.release.outputs.minor }}.${{ steps.release.outputs.patch }}
     steps:
-      - name: Parse version from tag
-        id: parse
-        run: |
-          TAG="${GITHUB_REF#refs/tags/}"
-          VERSION="${TAG#v}"
-          echo "tag=$TAG" >> $GITHUB_OUTPUT
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
-          echo "Release: $TAG (version $VERSION)"
-
-      - name: Checkout repository
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
-
-      - name: Verify version files match tag
-        run: |
-          VERSION="${{ steps.parse.outputs.version }}"
-
-          PKG_VERSION=$(node -p "require('./package.json').version")
-          TAURI_VERSION=$(node -p "require('./src-tauri/tauri.conf.json').version")
-          CARGO_VERSION=$(grep -m1 '^version' src-tauri/Cargo.toml | sed 's/.*"\(.*\)".*/\1/')
-
-          echo "Tag version:   $VERSION"
-          echo "package.json:  $PKG_VERSION"
-          echo "tauri.conf:    $TAURI_VERSION"
-          echo "Cargo.toml:    $CARGO_VERSION"
-
-          MISMATCH=0
-          [ "$PKG_VERSION" != "$VERSION" ] && echo "::error::package.json ($PKG_VERSION) != tag ($VERSION)" && MISMATCH=1
-          [ "$TAURI_VERSION" != "$VERSION" ] && echo "::error::tauri.conf.json ($TAURI_VERSION) != tag ($VERSION)" && MISMATCH=1
-          [ "$CARGO_VERSION" != "$VERSION" ] && echo "::error::Cargo.toml ($CARGO_VERSION) != tag ($VERSION)" && MISMATCH=1
-
-          if [ "$MISMATCH" -eq 1 ]; then
-            echo "::error::Version mismatch! Run 'scripts/sync-version.sh $VERSION' and commit before tagging."
-            exit 1
-          fi
-
-  create-release:
-    needs: validate-tag
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
-
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@de2c0eb89ae2a093876385947365aca7b0e5f844
+      - uses: googleapis/release-please-action@v4
+        id: release
         with:
-          tag_name: ${{ needs.validate-tag.outputs.tag }}
-          name: Release ${{ needs.validate-tag.outputs.tag }}
-          generate_release_notes: true
-          draft: false
-          prerelease: false
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
 
   build-release:
-    needs: [validate-tag, create-release]
+    needs: release-please
+    if: needs.release-please.outputs.release_created == 'true'
     runs-on: ubuntu-latest
     environment: Vars
     strategy:
@@ -90,7 +47,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
         with:
-          ref: ${{ needs.validate-tag.outputs.tag }}
+          ref: ${{ needs.release-please.outputs.tag_name }}
 
       - name: Setup build environment
         uses: ./.github/actions/setup-environment
@@ -125,13 +82,13 @@ jobs:
 
       - name: Prepare release artifacts
         run: |
-          VERSION="${{ needs.validate-tag.outputs.tag }}"
+          TAG="${{ needs.release-please.outputs.tag_name }}"
           mkdir -p release-artifacts
 
           if [ "${{ matrix.artifact-type }}" = "aab" ]; then
-            cp src-tauri/gen/android/app/build/outputs/bundle/universalRelease/*.aab "release-artifacts/ka-cityrail-navigator-${VERSION}.aab"
+            cp src-tauri/gen/android/app/build/outputs/bundle/universalRelease/*.aab "release-artifacts/ka-cityrail-navigator-${TAG}.aab"
           else
-            cp src-tauri/gen/android/app/build/outputs/apk/universal/release/*.apk "release-artifacts/ka-cityrail-navigator-${VERSION}.apk"
+            cp src-tauri/gen/android/app/build/outputs/apk/universal/release/*.apk "release-artifacts/ka-cityrail-navigator-${TAG}.apk"
           fi
 
           sha256sum release-artifacts/* > "release-artifacts/${{ matrix.artifact-type }}.sha256"
@@ -139,7 +96,7 @@ jobs:
       - name: Upload build artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: release-${{ needs.validate-tag.outputs.tag }}-${{ matrix.artifact-type }}
+          name: release-${{ needs.release-please.outputs.tag_name }}-${{ matrix.artifact-type }}
           path: release-artifacts/*
           retention-days: 90
 
@@ -148,20 +105,21 @@ jobs:
         run: rm -f $RUNNER_TEMP/keystore.jks src-tauri/gen/android/keystore.properties
 
   publish-release-assets:
-    needs: [validate-tag, build-release]
+    needs: [release-please, build-release]
+    if: needs.release-please.outputs.release_created == 'true'
     runs-on: ubuntu-latest
 
     steps:
       - name: Download AAB artifact
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
-          name: release-${{ needs.validate-tag.outputs.tag }}-aab
+          name: release-${{ needs.release-please.outputs.tag_name }}-aab
           path: release-artifacts
 
       - name: Download APK artifact
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
-          name: release-${{ needs.validate-tag.outputs.tag }}-apk
+          name: release-${{ needs.release-please.outputs.tag_name }}-apk
           path: release-artifacts
 
       - name: Create combined checksums
@@ -172,7 +130,7 @@ jobs:
       - name: Upload artifacts to release
         uses: softprops/action-gh-release@de2c0eb89ae2a093876385947365aca7b0e5f844
         with:
-          tag_name: ${{ needs.validate-tag.outputs.tag }}
+          tag_name: ${{ needs.release-please.outputs.tag_name }}
           files: |
             release-artifacts/*.aab
             release-artifacts/*.apk
@@ -182,15 +140,15 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   upload-playstore:
-    needs: [validate-tag, build-release]
+    needs: [release-please, build-release]
     runs-on: ubuntu-latest
-    if: vars.AUTO_PUBLISH_PLAYSTORE == 'true'
+    if: needs.release-please.outputs.release_created == 'true' && vars.AUTO_PUBLISH_PLAYSTORE == 'true'
 
     steps:
       - name: Download AAB
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
-          name: release-${{ needs.validate-tag.outputs.tag }}-aab
+          name: release-${{ needs.release-please.outputs.tag_name }}-aab
           path: ./
 
       - name: Upload to Play Store

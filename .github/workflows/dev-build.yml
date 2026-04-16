@@ -7,43 +7,44 @@ on:
       - '**/*.md'
       - 'LICENSE'
 
+permissions:
+  contents: write
+  pull-requests: write
+
 concurrency:
   group: dev-build-${{ github.ref }}
   cancel-in-progress: true
-
-permissions:
-  contents: write
 
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
+      version: ${{ steps.release.outputs.version }}
+    steps:
+      - uses: googleapis/release-please-action@v4
+        id: release
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          target-branch: development
+          config-file: release-please-config-dev.json
+          manifest-file: .release-please-manifest.json
+
   build-dev:
+    needs: release-please
+    if: needs.release-please.outputs.release_created == 'true'
     runs-on: ubuntu-latest
     environment: Vars
-    
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
         with:
-          fetch-depth: 0
-
-      - name: Get version info
-        id: version
-        run: |
-          git fetch --tags --force
-          LATEST_TAG=$(git describe --tags --abbrev=0 origin/main 2>/dev/null || echo "v0.0.0")
-          SHORT_SHA=$(git rev-parse --short HEAD)
-          VERSION="${LATEST_TAG#v}"
-          VERSION="${VERSION%-pre_dev}"
-          MAJOR=$(echo $VERSION | cut -d. -f1)
-          MINOR=$(echo $VERSION | cut -d. -f2)
-          PATCH=$(echo $VERSION | cut -d. -f3)
-          PATCH=$((PATCH + 1))
-          NEXT_VERSION="${MAJOR}.${MINOR}.${PATCH}"
-          echo "version=$NEXT_VERSION" >> $GITHUB_OUTPUT
-          echo "sha=$SHORT_SHA" >> $GITHUB_OUTPUT
-          echo "Latest tag: $LATEST_TAG -> Next: $NEXT_VERSION-pre_dev ($SHORT_SHA)"
+          ref: ${{ needs.release-please.outputs.tag_name }}
 
       - name: Setup build environment
         uses: ./.github/actions/setup-environment
@@ -69,37 +70,27 @@ jobs:
         env:
           NDK_HOME: ${{ steps.setup-env.outputs.ndk-path }}
 
-      - name: Rename artifacts
+      - name: Prepare artifacts
         run: |
-          VERSION="${{ steps.version.outputs.version }}"
+          TAG="${{ needs.release-please.outputs.tag_name }}"
           mkdir -p dev-artifacts
-          cp src-tauri/gen/android/app/build/outputs/apk/universal/release/*.apk dev-artifacts/ka-cityrail-navigator-${VERSION}-pre_dev.apk
+          cp src-tauri/gen/android/app/build/outputs/apk/universal/release/*.apk "dev-artifacts/ka-cityrail-navigator-${TAG}.apk"
           sha256sum dev-artifacts/*.apk > dev-artifacts/SHA256SUMS
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: dev-build-${{ steps.version.outputs.version }}-pre_dev
+          name: dev-build-${{ needs.release-please.outputs.tag_name }}
           path: dev-artifacts/*
           retention-days: 30
 
-      - name: Create or update pre-release
+      - name: Upload to pre-release
         uses: softprops/action-gh-release@de2c0eb89ae2a093876385947365aca7b0e5f844
         with:
-          tag_name: v${{ steps.version.outputs.version }}-pre_dev
-          name: Pre-release v${{ steps.version.outputs.version }}-pre_dev
+          tag_name: ${{ needs.release-please.outputs.tag_name }}
           files: |
             dev-artifacts/*.apk
             dev-artifacts/SHA256SUMS
-          prerelease: true
-          generate_release_notes: false
-          body: |
-            Development build from `development` branch (arm64 only, signed).
-            
-            Commit: ${{ steps.version.outputs.sha }}
-            
-            ✅ APK is signed - can be installed directly without Play Store.
-            ⚠️ This is a pre-release build for testing purposes.
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
