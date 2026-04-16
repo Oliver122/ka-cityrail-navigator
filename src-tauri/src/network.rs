@@ -125,9 +125,7 @@ fn android_detect_wifi() -> Option<ConnectionInfo> {
 pub fn get_current_connection() -> Option<ConnectionInfo> {
     #[cfg(target_os = "android")]
     {
-        return std::panic::catch_unwind(android_detect_wifi)
-            .ok()
-            .flatten();
+        return std::panic::catch_unwind(android_detect_wifi).ok().flatten();
     }
 
     #[cfg(not(target_os = "android"))]
@@ -267,10 +265,7 @@ pub fn unpin_stop_from_network(
 }
 
 #[tauri::command]
-pub fn get_network_stops(
-    state: tauri::State<AppState>,
-    ssid: String,
-) -> Result<Vec<Stop>, String> {
+pub fn get_network_stops(state: tauri::State<AppState>, ssid: String) -> Result<Vec<Stop>, String> {
     use crate::schema::{network_stops, stops};
     let mut conn = state.db.lock().map_err(|e| e.to_string())?;
     network_stops::table

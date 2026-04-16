@@ -305,10 +305,7 @@ pub async fn search_stops(
 }
 
 #[tauri::command]
-pub fn search_stops_db(
-    state: tauri::State<AppState>,
-    query: String,
-) -> Result<Vec<Stop>, String> {
+pub fn search_stops_db(state: tauri::State<AppState>, query: String) -> Result<Vec<Stop>, String> {
     use crate::schema::stops;
     let pattern = format!("%{}%", query);
     let mut conn = state.db.lock().map_err(|e| e.to_string())?;

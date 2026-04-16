@@ -25,10 +25,7 @@ fn get_db_path(app: &tauri::AppHandle) -> String {
             .expect("Failed to resolve Android app data directory");
         std::fs::create_dir_all(&app_data_dir)
             .expect("Failed to create Android app data directory");
-        return app_data_dir
-            .join("stops.db")
-            .to_string_lossy()
-            .to_string();
+        return app_data_dir.join("stops.db").to_string_lossy().to_string();
     }
 
     #[cfg(not(target_os = "android"))]
