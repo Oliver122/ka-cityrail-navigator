@@ -78,6 +78,19 @@ interface TripStopSeqResponse {
 /** When countdown exceeds this value (minutes) show real_time instead of "N min". */
 const MAX_COUNTDOWN_DISPLAY_MIN = 20;
 
+/** Max time (ms) to wait for a route/invoke call before giving up. */
+const INVOKE_TIMEOUT_MS = 12_000;
+
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`${label}: timed out after ${ms}ms`)), ms);
+    promise.then(
+      (v) => { clearTimeout(timer); resolve(v); },
+      (e) => { clearTimeout(timer); reject(e); },
+    );
+  });
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function haversineKm(lat1: number, lon1: number, lat2: number, lon2: number): number {
   const R = 6371;
@@ -117,6 +130,16 @@ function createMockRouteStops(departure: Departure, stopName: string): RouteStop
 // ── App ───────────────────────────────────────────────────────────────────────
 
 function App() {
+  // Prevent unhandled promise rejections from crashing the WebView
+  useEffect(() => {
+    const handler = (e: PromiseRejectionEvent) => {
+      e.preventDefault();
+      console.warn("Unhandled rejection caught:", e.reason);
+    };
+    window.addEventListener("unhandledrejection", handler);
+    return () => window.removeEventListener("unhandledrejection", handler);
+  }, []);
+
   const [page, setPage] = useState<AppPage>("departures");
   const [nearbyStops, setNearbyStops] = useState<Stop[]>([]);
   const [mapStops, setMapStops] = useState<Stop[]>([]);
@@ -227,9 +250,17 @@ function App() {
       // Collect network-pinned stops so their departures are loaded too
       let netStops: Stop[] = [];
       try {
-        const net = await invoke<NetworkInfo | null>("check_current_network");
+        const net = await withTimeout(
+          invoke<NetworkInfo | null>("check_current_network"),
+          8000,
+          "Initial network check",
+        );
         if (net) {
-          netStops = await invoke<Stop[]>("get_network_stops", { ssid: net.ssid });
+          netStops = await withTimeout(
+            invoke<Stop[]>("get_network_stops", { ssid: net.ssid }),
+            5000,
+            "Initial network stops",
+          );
           setNetworkStops(netStops);
           setKnownNetwork(net);
         }
@@ -244,7 +275,11 @@ function App() {
 
       const results = await Promise.all(
         all.map((s) =>
-          invoke<Departure[]>("fetch_departures", { stopId: s.id, timeWindowMinutes: settings.timeWindowMinutes })
+          withTimeout(
+            invoke<Departure[]>("fetch_departures", { stopId: s.id, timeWindowMinutes: settings.timeWindowMinutes }),
+            INVOKE_TIMEOUT_MS,
+            `Departures ${s.id}`,
+          )
             .then((deps) => [s.id, deps] as [string, Departure[]])
             .catch(() => [s.id, []] as [string, Departure[]])
         )
@@ -317,18 +352,22 @@ function App() {
 
   useEffect(() => { load(); }, [load]);
 
-  // Poll network status every 15 seconds
+  // Poll network status every 15 seconds (with timeout so it never hangs)
   useEffect(() => {
     const check = async () => {
       try {
         const [net, conn] = await Promise.all([
-          invoke<NetworkInfo | null>("check_current_network"),
-          invoke<ConnectionInfo | null>("get_current_connection"),
+          withTimeout(invoke<NetworkInfo | null>("check_current_network"), 8000, "Network check"),
+          withTimeout(invoke<ConnectionInfo | null>("get_current_connection"), 8000, "Connection check"),
         ]);
         setKnownNetwork(net);
         if (conn) setConnType(conn.conn_type);
         if (net) {
-          const ns = await invoke<Stop[]>("get_network_stops", { ssid: net.ssid });
+          const ns = await withTimeout(
+            invoke<Stop[]>("get_network_stops", { ssid: net.ssid }),
+            5000,
+            "Network stops",
+          );
           setNetworkStops(ns);
         } else {
           setNetworkStops([]);
@@ -392,13 +431,17 @@ function App() {
       disruption: dep.delay_minutes > 5 ? `Delay of ${dep.delay_minutes} minutes due to operational issues` : undefined,
     };
     try {
-      const route = await invoke<TripStopSeqResponse>("fetch_trip_stopseq", {
-        stopId: dep.stop_id || stop.id,
-        lineStateless: dep.line_stateless,
-        tripCode: dep.trip_code,
-        serviceDate: dep.service_date,
-        serviceTime: dep.service_time,
-      });
+      const route = await withTimeout(
+        invoke<TripStopSeqResponse>("fetch_trip_stopseq", {
+          stopId: dep.stop_id || stop.id,
+          lineStateless: dep.line_stateless,
+          tripCode: dep.trip_code,
+          serviceDate: dep.service_date,
+          serviceTime: dep.service_time,
+        }),
+        INVOKE_TIMEOUT_MS,
+        "Route loading",
+      );
       const currentStopId = dep.stop_id || stop.id;
       const hasRouteStops = route.route_stops.length > 0;
       const detail: DepartureDetail = {
