@@ -10,6 +10,7 @@ use diesel::sqlite::SqliteConnection;
 use serde::Serialize;
 use serde_json::Value;
 use std::sync::Mutex;
+use std::time::Duration;
 use tauri::Manager;
 
 // ── Build-time API base URLs (override via .env at compile time) ──────────────
@@ -81,6 +82,14 @@ fn haversine_km(lat1: f64, lon1: f64, lat2: f64, lon2: f64) -> f64 {
 }
 
 struct DbState(Mutex<SqliteConnection>);
+
+fn http_client(timeout_secs: u64) -> Result<reqwest::blocking::Client, String> {
+    reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(timeout_secs))
+        .connect_timeout(Duration::from_secs(5))
+        .build()
+        .map_err(|e| e.to_string())
+}
 
 // ── KVV DM helper ──────────────────────────────────────────────────────────────
 
@@ -177,7 +186,9 @@ fn fetch_stop(stop_id: &str) -> Result<Stop, String> {
 &useOnlyStops=1&useRealtime=1&limit=30"
     );
 
-    let resp: Value = reqwest::blocking::get(&url)
+    let resp: Value = http_client(10)?
+        .get(&url)
+        .send()
         .map_err(|e| e.to_string())?
         .json()
         .map_err(|e| e.to_string())?;
@@ -224,7 +235,9 @@ fn fetch_departures(stop_id: String) -> Result<Vec<Departure>, String> {
 &useOnlyStops=1&useRealtime=1&limit=30"
     );
 
-    let resp: Value = reqwest::blocking::get(&url)
+    let resp: Value = http_client(15)?
+        .get(&url)
+        .send()
         .map_err(|e| e.to_string())?
         .json()
         .map_err(|e| e.to_string())?;
@@ -309,7 +322,9 @@ fn fetch_trip_stopseq(
         .append_pair("tStOTType", "NEXT")
         .append_pair("hideBannerInfo", "1");
 
-    let raw = reqwest::blocking::get(url)
+    let raw = http_client(10)?
+        .get(url)
+        .send()
         .map_err(|e| e.to_string())?
         .text()
         .map_err(|e| e.to_string())?;
@@ -417,7 +432,9 @@ fn search_stops(query: String) -> Result<Vec<Stop>, String> {
 &locationServerActive=1&type_sf=any&name_sf={encoded}&anyObjFilter_sf=2"
     );
 
-    let resp: Value = reqwest::blocking::get(&url)
+    let resp: Value = http_client(10)?
+        .get(&url)
+        .send()
         .map_err(|e| e.to_string())?
         .json()
         .map_err(|e| e.to_string())?;
@@ -595,7 +612,9 @@ fn fetch_stops_in_bounds_inner(
 &coordOutputFormat=WGS84[DD.DDDDD]&outputFormat=json&inclFilter=1&type_1=STOP"
     );
 
-    let raw = reqwest::blocking::get(&url)
+    let raw = http_client(10)?
+        .get(&url)
+        .send()
         .map_err(|e| e.to_string())?
         .text()
         .map_err(|e| e.to_string())?;
@@ -764,8 +783,8 @@ fn android_detect_wifi() -> Option<ConnectionInfo> {
         Some(trimmed.to_string())
     }
 
-    /// Spawn a command and read at most `max_bytes` of stdout, then kill it.
-    /// Prevents OOM from commands that dump megabytes (e.g. `dumpsys wifi`).
+    /// Spawn a command with a hard 3-second wall-clock deadline.
+    /// Reads at most `max_bytes` of stdout, then kills the child.
     fn run_limited(bin: &str, args: &[&str], max_bytes: usize) -> Option<String> {
         let mut child = Command::new(bin)
             .args(args)
@@ -773,10 +792,12 @@ fn android_detect_wifi() -> Option<ConnectionInfo> {
             .stderr(Stdio::null())
             .spawn()
             .ok()?;
+
+        let deadline = std::time::Instant::now() + Duration::from_secs(3);
         let mut stdout = child.stdout.take()?;
         let mut buf = vec![0u8; max_bytes];
         let mut filled = 0;
-        while filled < max_bytes {
+        while filled < max_bytes && std::time::Instant::now() < deadline {
             match stdout.read(&mut buf[filled..]) {
                 Ok(0) => break,
                 Ok(n) => filled += n,
@@ -810,7 +831,14 @@ fn android_detect_wifi() -> Option<ConnectionInfo> {
         }
     }
 
-    // 2) `wpa_cli -i wlan0 status` — key=value output, available on many ROMs
+    // 2) `getprop` — often exposes the current SSID without extra permissions
+    if let Some(out) = run_limited("getprop", &["dhcp.wlan0.domain"], 256) {
+        if let Some(ssid) = normalize_ssid(&out) {
+            return wifi_from(ssid);
+        }
+    }
+
+    // 3) `wpa_cli -i wlan0 status` — key=value output, available on many ROMs
     if let Some(out) = run_limited("wpa_cli", &["-i", "wlan0", "status"], 4096) {
         for line in out.lines() {
             if let Some(ssid) = line.strip_prefix("ssid=") {
@@ -821,7 +849,7 @@ fn android_detect_wifi() -> Option<ConnectionInfo> {
         }
     }
 
-    // 3) `dumpsys wifi` — heavy; cap at 16 KB and look for "mWifiInfo" SSID field
+    // 4) `dumpsys wifi` — heavy; cap at 16 KB and look for "mWifiInfo" SSID field
     if let Some(out) = run_limited("dumpsys", &["wifi"], 16384) {
         for line in out.lines() {
             let trimmed = line.trim();
@@ -831,7 +859,6 @@ fn android_detect_wifi() -> Option<ConnectionInfo> {
                     return wifi_from(ssid);
                 }
             }
-            // mWifiInfo format: "... SSID: \"MyWifi\", ..."
             if trimmed.contains("mWifiInfo") {
                 if let Some(pos) = trimmed.find("SSID: ") {
                     let rest = &trimmed[pos + 6..];
@@ -841,6 +868,14 @@ fn android_detect_wifi() -> Option<ConnectionInfo> {
                     }
                 }
             }
+        }
+    }
+
+    // 5) Filesystem fallback: if wlan0 is "up", report wifi even without SSID.
+    //    The app can still match networks by checking the DB for any single saved network.
+    if let Ok(state) = std::fs::read_to_string("/sys/class/net/wlan0/operstate") {
+        if state.trim() == "up" {
+            return wifi_from("WiFi".to_string());
         }
     }
 
