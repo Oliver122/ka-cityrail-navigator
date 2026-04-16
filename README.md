@@ -137,7 +137,11 @@ src/                       React frontend
   storage.ts               localStorage helpers (starred stops, manual coords)
 src-tauri/
   src/
-    lib.rs                 All Tauri commands + app entry point
+    lib.rs                 App entry point, state setup, command registration
+    kvv.rs                 KVV API commands (departures, stops, search)
+    network.rs             WiFi detection + network/stop DB commands
+    helpers.rs             Pure utility functions (haversine, line name shortening, etc.)
+    types.rs               Shared data structures (Departure, ConnectionInfo, etc.)
     db.rs                  Diesel models, repository functions, connection setup
     schema.rs              Diesel-generated table DSL (do not edit manually)
     main.rs                Binary entry point (calls lib::run)
@@ -148,22 +152,57 @@ src-tauri/
 
 ---
 
+## Branching & Commits
+
+The project uses [Conventional Commits](https://www.conventionalcommits.org/) and a two-tier branch model:
+
+```
+feat/*, fix/*, …  →  development  →  main
+                     (pre-release)    (stable)
+```
+
+### Commit format
+
+Every commit (and every PR title) **must** follow:
+
+```
+<type>(<scope>): <short summary>
+```
+
+| Type | Meaning | Version effect |
+|------|---------|----------------|
+| `feat` | New feature | **minor** bump |
+| `fix` | Bug fix | **patch** bump |
+| `feat!` or `BREAKING CHANGE` footer | Breaking change | **major** bump |
+| `perf`, `refactor`, `docs`, `style`, `test`, `build`, `ci`, `chore` | Non-user-facing | patch (hidden from changelog) |
+
+PR titles are validated automatically — a PR with a non-conventional title will fail CI.
+
+### How versioning works
+
+Versioning is fully automatic via [release-please](https://github.com/googleapis/release-please):
+
+1. **You push commits** to `development` or `main` using Conventional Commits.
+2. **release-please opens a Release PR** that bumps the version in `package.json`, `src-tauri/tauri.conf.json`, and `src-tauri/Cargo.toml`, and updates `CHANGELOG.md`.
+3. **You merge the Release PR** → a git tag is created and the build pipeline runs.
+
+| Branch | Version style | Artifact |
+|--------|--------------|----------|
+| `development` | `0.2.0-dev.1`, `0.2.0-dev.2`, … | Signed arm64 APK (GitHub pre-release) |
+| `main` | `0.2.0` | Signed APK + AAB (GitHub release, optional Play Store) |
+
+You never edit version numbers manually — release-please owns them.
+
+---
+
 ## CI/CD Pipelines
 
 | Workflow | Trigger | What it does |
 |----------|---------|--------------|
-| **PR Validation** | Pull request to `development` or `main` | Builds frontend, runs Rust format/lint/tests, then builds Android APK (aarch64) |
-| **Dev Build** | Push to `development` | Builds signed arm64 APK versioned as `x.x.x-pre_dev`, uploads APK + SHA256 checksums (30-day retention), creates/updates GitHub pre-release |
-| **Release Build** | Push to `main` | Auto-bumps version from commit semantics, builds signed AAB/APK in parallel, publishes release assets + checksums, optionally uploads AAB to Play Store |
+| **PR Validation** | Pull request to `development` or `main` | Validates PR title (Conventional Commits), builds frontend, runs Rust format/lint/tests, builds Android APK (aarch64) |
+| **Dev Build** | Push to `development` | release-please manages a pre-release PR; on merge, tags `vX.Y.Z-dev.N`, builds signed arm64 APK, publishes as GitHub pre-release |
+| **Release** | Push to `main` | release-please manages a stable release PR; on merge, tags `vX.Y.Z`, builds signed AAB + APK in parallel, publishes release assets, optionally uploads AAB to Play Store |
 | **Security Scans** | PR/push to `development` or `main`, weekly schedule, manual | Runs CodeQL (JS + Rust) and dependency audits (`npm audit`, `cargo audit`) |
-
-### Versioning Convention
-
-Version bump on `main` push is derived from commit semantics since last tag:
-- `BREAKING CHANGE` footer or `type!:` commit subject → **major** (**1**.0.0)
-- `feat:` (or merged `feat/` PR) → **minor** (0.**1**.0)
-- all other code changes → **patch** (0.0.**1**)
-- CI/docs-only changes (`.github/`, `*.md`, `LICENSE`) → no bump / no build
 
 ---
 
