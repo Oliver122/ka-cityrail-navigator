@@ -22,7 +22,7 @@ jobs:
       pull-requests: read
     steps:
       - name: Validate PR title (Conventional Commits)
-        uses: amannn/action-semantic-pull-request@0723387faaf9b38adef4775cd42cfd5155571e33
+        uses: amannn/action-semantic-pull-request@800da4c97f618e44f972ff9bc21ab5daecc97773
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
