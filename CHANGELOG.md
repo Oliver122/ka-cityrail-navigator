@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.3.1](https://github.com/Oliver122/ka-cityrail-navigator/compare/ka-cityrail-navigator-v0.3.0...ka-cityrail-navigator-v0.3.1) (2026-07-18)
+
+
+### Bug Fixes
+
+* **android:** read WiFi SSID via WifiManager JNI ([9f02fbf](https://github.com/Oliver122/ka-cityrail-navigator/commit/9f02fbf027eb2a811aa0f6b04688ca8b7bfdab03))
+* **departures:** group departures by platform within station card ([211440f](https://github.com/Oliver122/ka-cityrail-navigator/commit/211440fdc8fea262fc02564aa0ff56051e97bbe5))
+* **settings:** allow free editing of numeric display inputs ([7b1c557](https://github.com/Oliver122/ka-cityrail-navigator/commit/7b1c557b424539f1d253932d4c5bfc8be3e7e5e8))
+
 ## [0.3.0](https://github.com/Oliver122/ka-cityrail-navigator/compare/ka-cityrail-navigator-v0.2.0...ka-cityrail-navigator-v0.3.0) (2026-07-16)
 
 
