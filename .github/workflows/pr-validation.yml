@@ -69,6 +69,9 @@ jobs:
       - name: Initialize Android project
         run: npx tauri android init
 
+      - name: Patch Android manifest (WiFi permissions)
+        run: ./scripts/patch-android-manifest.sh
+
       - name: Build Android APK (quick validation - aarch64 only)
         run: npx tauri android build --apk --target aarch64
         env:

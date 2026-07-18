@@ -9,110 +9,111 @@ use crate::AppState;
 // ── Android WiFi detection ────────────────────────────────────────────────────
 
 #[cfg(target_os = "android")]
+fn normalize_ssid(raw: &str) -> Option<String> {
+    let trimmed = raw.trim().trim_matches('"').trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let lower = trimmed.to_ascii_lowercase();
+    if lower == "<unknown ssid>" || lower == "unknown ssid" || lower == "n/a" {
+        return None;
+    }
+    Some(trimmed.to_string())
+}
+
+/// Query the connected WiFi SSID through the Android `WifiManager` API via JNI.
+///
+/// Shell tools (`cmd wifi`, `dumpsys`, `wpa_cli`) are not accessible to
+/// untrusted apps, so this is the only reliable in-app way to read the SSID.
+/// Requires `ACCESS_WIFI_STATE` in the manifest plus runtime location
+/// permission (already requested by the geolocation plugin); otherwise
+/// Android reports `<unknown ssid>` and we return `None`.
+#[cfg(target_os = "android")]
+fn android_wifi_ssid_via_jni() -> Option<String> {
+    use jni::objects::{JObject, JString, JValue};
+
+    // Clear any pending Java exception so subsequent JNI calls stay valid.
+    fn ok_or_clear<T>(env: &mut jni::JNIEnv, res: jni::errors::Result<T>) -> Option<T> {
+        match res {
+            Ok(v) => Some(v),
+            Err(_) => {
+                let _ = env.exception_clear();
+                None
+            }
+        }
+    }
+
+    let ctx = ndk_context::android_context();
+    let vm = unsafe { jni::JavaVM::from_raw(ctx.vm().cast()) }.ok()?;
+    let activity = unsafe { JObject::from_raw(ctx.context().cast()) };
+    let mut env = vm.attach_current_thread().ok()?;
+
+    let app_context = {
+        let res = env.call_method(
+            &activity,
+            "getApplicationContext",
+            "()Landroid/content/Context;",
+            &[],
+        );
+        ok_or_clear(&mut env, res)?.l().ok()?
+    };
+
+    let service_name = env.new_string("wifi").ok()?;
+    let wifi_manager = {
+        let res = env.call_method(
+            &app_context,
+            "getSystemService",
+            "(Ljava/lang/String;)Ljava/lang/Object;",
+            &[JValue::Object(&service_name)],
+        );
+        ok_or_clear(&mut env, res)?.l().ok()?
+    };
+    if wifi_manager.is_null() {
+        return None;
+    }
+
+    let wifi_info = {
+        let res = env.call_method(
+            &wifi_manager,
+            "getConnectionInfo",
+            "()Landroid/net/wifi/WifiInfo;",
+            &[],
+        );
+        ok_or_clear(&mut env, res)?.l().ok()?
+    };
+    if wifi_info.is_null() {
+        return None;
+    }
+
+    let ssid_obj = {
+        let res = env.call_method(&wifi_info, "getSSID", "()Ljava/lang/String;", &[]);
+        ok_or_clear(&mut env, res)?.l().ok()?
+    };
+    if ssid_obj.is_null() {
+        return None;
+    }
+
+    let ssid: String = env.get_string(&JString::from(ssid_obj)).ok()?.into();
+    normalize_ssid(&ssid)
+}
+
+#[cfg(target_os = "android")]
 fn android_detect_wifi() -> Option<ConnectionInfo> {
-    use std::io::Read as _;
-    use std::process::{Command, Stdio};
-    use std::time::Duration;
-
-    fn normalize_ssid(raw: &str) -> Option<String> {
-        let trimmed = raw.trim().trim_matches('"').trim();
-        if trimmed.is_empty() {
-            return None;
-        }
-        let lower = trimmed.to_ascii_lowercase();
-        if lower == "<unknown ssid>" || lower == "unknown ssid" || lower == "n/a" {
-            return None;
-        }
-        Some(trimmed.to_string())
-    }
-
-    /// Spawn a command with a hard 3-second wall-clock deadline.
-    /// Reads at most `max_bytes` of stdout, then kills the child.
-    fn run_limited(bin: &str, args: &[&str], max_bytes: usize) -> Option<String> {
-        let mut child = Command::new(bin)
-            .args(args)
-            .stdout(Stdio::piped())
-            .stderr(Stdio::null())
-            .spawn()
-            .ok()?;
-
-        let deadline = std::time::Instant::now() + Duration::from_secs(3);
-        let mut stdout = child.stdout.take()?;
-        let mut buf = vec![0u8; max_bytes];
-        let mut filled = 0;
-        while filled < max_bytes && std::time::Instant::now() < deadline {
-            match stdout.read(&mut buf[filled..]) {
-                Ok(0) => break,
-                Ok(n) => filled += n,
-                Err(_) => break,
-            }
-        }
-        drop(stdout);
-        let _ = child.kill();
-        let _ = child.wait();
-        Some(String::from_utf8_lossy(&buf[..filled]).into_owned())
-    }
-
-    fn wifi_from(name: String) -> Option<ConnectionInfo> {
-        Some(ConnectionInfo {
-            name,
+    if let Some(ssid) = android_wifi_ssid_via_jni() {
+        return Some(ConnectionInfo {
+            name: ssid,
             conn_type: "wifi".to_string(),
-        })
+        });
     }
 
-    if let Some(out) = run_limited("cmd", &["wifi", "status"], 4096) {
-        for line in out.lines() {
-            let trimmed = line.trim();
-            if let Some((k, v)) = trimmed.split_once(':') {
-                if k.trim().eq_ignore_ascii_case("ssid") {
-                    if let Some(ssid) = normalize_ssid(v) {
-                        return wifi_from(ssid);
-                    }
-                }
-            }
-        }
-    }
-
-    if let Some(out) = run_limited("getprop", &["dhcp.wlan0.domain"], 256) {
-        if let Some(ssid) = normalize_ssid(&out) {
-            return wifi_from(ssid);
-        }
-    }
-
-    if let Some(out) = run_limited("wpa_cli", &["-i", "wlan0", "status"], 4096) {
-        for line in out.lines() {
-            if let Some(ssid) = line.strip_prefix("ssid=") {
-                if let Some(name) = normalize_ssid(ssid) {
-                    return wifi_from(name);
-                }
-            }
-        }
-    }
-
-    if let Some(out) = run_limited("dumpsys", &["wifi"], 16384) {
-        for line in out.lines() {
-            let trimmed = line.trim();
-            if let Some(rest) = trimmed.strip_prefix("SSID:") {
-                let end = rest.find(',').unwrap_or(rest.len());
-                if let Some(ssid) = normalize_ssid(&rest[..end]) {
-                    return wifi_from(ssid);
-                }
-            }
-            if trimmed.contains("mWifiInfo") {
-                if let Some(pos) = trimmed.find("SSID: ") {
-                    let rest = &trimmed[pos + 6..];
-                    let end = rest.find(',').unwrap_or(rest.len());
-                    if let Some(ssid) = normalize_ssid(&rest[..end]) {
-                        return wifi_from(ssid);
-                    }
-                }
-            }
-        }
-    }
-
+    // Fallback: interface is up but the SSID is not readable
+    // (permission denied or location services disabled).
     if let Ok(state) = std::fs::read_to_string("/sys/class/net/wlan0/operstate") {
         if state.trim() == "up" {
-            return wifi_from("WiFi".to_string());
+            return Some(ConnectionInfo {
+                name: "WiFi".to_string(),
+                conn_type: "wifi".to_string(),
+            });
         }
     }
 
