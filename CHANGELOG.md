@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.2](https://github.com/Oliver122/ka-cityrail-navigator/compare/ka-cityrail-navigator-v0.3.1...ka-cityrail-navigator-v0.3.2) (2026-07-18)
+
+
+### Bug Fixes
+
+* **deps:** clear npm high audit findings ([8d08952](https://github.com/Oliver122/ka-cityrail-navigator/commit/8d0895262192157927d6a9146dbd8fc6f0d634da))
+
 ## [0.3.1](https://github.com/Oliver122/ka-cityrail-navigator/compare/ka-cityrail-navigator-v0.3.0...ka-cityrail-navigator-v0.3.1) (2026-07-18)
 
 
