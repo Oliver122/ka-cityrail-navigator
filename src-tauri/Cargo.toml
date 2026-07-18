@@ -1,6 +1,6 @@
 [package]
 name = "ka-cityrail-navigator"
-version = "0.2.0"
+version = "0.3.0" # x-release-please-version
 description = "Real-time KVV departure board for Karlsruhe public transport"
 authors = ["oliver"]
 edition = "2021"
@@ -29,3 +29,7 @@ diesel_migrations = "2"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 dirs = "5"
 tauri-plugin-geolocation = "2.3.2"
+
+[target.'cfg(target_os = "android")'.dependencies]
+jni = "0.21"
+ndk-context = "0.1"

@@ -117,6 +117,20 @@ function kvDateTimeToDisplay(value: string): string {
   return parts[1].slice(0, 5);
 }
 
+/** Group departures by platform (Gleis), sorted numerically ("2" before "10"). */
+function groupByPlatform(deps: Departure[]): [string, Departure[]][] {
+  const groups = new Map<string, Departure[]>();
+  for (const dep of deps) {
+    const key = dep.platform.trim();
+    const list = groups.get(key);
+    if (list) list.push(dep);
+    else groups.set(key, [dep]);
+  }
+  return [...groups.entries()].sort(([a], [b]) =>
+    a.localeCompare(b, undefined, { numeric: true })
+  );
+}
+
 // Create mock route stops for departure details
 function createMockRouteStops(departure: Departure, stopName: string): RouteStop[] {
   return [
@@ -657,34 +671,47 @@ function App() {
                             <span className="col-scheduled">Sched.</span>
                             <span className="col-eta">ETA</span>
                           </div>
-                          {/* Table Rows - Scrollable */}
+                          {/* Table Rows - Scrollable, grouped by platform */}
                           <div className="departures-rows-wrapper">
-                            {deps.map((dep, i) => {
-                              const eta = formatCountdown(dep.countdown, dep.real_time);
-                              const isDelayed = dep.delay_minutes > 0;
-                              const rowId = `${stop.id}-${dep.line}-${dep.planned_time}`;
-                              const isRouteLoading = routeLoadingId === rowId;
-                              
-                              return (
-                                <div 
-                                  key={i} 
-                                  className="departure-row"
-                                  onClick={() => handleDepartureClick(stop, dep)}
-                                >
-                                  <span className="col-line">
-                                    <LineBadge line={dep.line} motType={dep.mot_type} />
-                                  </span>
-                                  <span className="col-destination">{dep.direction}</span>
-                                  <span className="col-platform">{dep.platform || "-"}</span>
-                                  <span className="col-scheduled">{dep.planned_time}</span>
-                                  <span className={`col-eta ${isDelayed ? "delayed" : ""}`}>
-                                    {isRouteLoading
-                                      ? "…"
-                                      : isDelayed ? `+${dep.delay_minutes} min` : eta.text}
-                                  </span>
+                            {(() => {
+                              const groups = groupByPlatform(deps);
+                              const showDividers = groups.length > 1;
+                              return groups.map(([platform, platformDeps]) => (
+                                <div key={platform || "no-platform"} className="platform-group">
+                                  {showDividers && (
+                                    <div className="platform-divider">
+                                      {platform ? `Gleis ${platform}` : "Ohne Gleisangabe"}
+                                    </div>
+                                  )}
+                                  {platformDeps.map((dep, i) => {
+                                    const eta = formatCountdown(dep.countdown, dep.real_time);
+                                    const isDelayed = dep.delay_minutes > 0;
+                                    const rowId = `${stop.id}-${dep.line}-${dep.planned_time}`;
+                                    const isRouteLoading = routeLoadingId === rowId;
+
+                                    return (
+                                      <div 
+                                        key={i} 
+                                        className="departure-row"
+                                        onClick={() => handleDepartureClick(stop, dep)}
+                                      >
+                                        <span className="col-line">
+                                          <LineBadge line={dep.line} motType={dep.mot_type} />
+                                        </span>
+                                        <span className="col-destination">{dep.direction}</span>
+                                        <span className="col-platform">{dep.platform || "-"}</span>
+                                        <span className="col-scheduled">{dep.planned_time}</span>
+                                        <span className={`col-eta ${isDelayed ? "delayed" : ""}`}>
+                                          {isRouteLoading
+                                            ? "…"
+                                            : isDelayed ? `+${dep.delay_minutes} min` : eta.text}
+                                        </span>
+                                      </div>
+                                    );
+                                  })}
                                 </div>
-                              );
-                            })}
+                              ));
+                            })()}
                           </div>
                         </>
                       )}

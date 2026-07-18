@@ -34,9 +34,10 @@ export default function Settings({ starred, manualCoords, displaySettings, onSta
   const [lon, setLon] = useState(String(manualCoords.lon));
   const [coordsSaved, setCoordsSaved] = useState(false);
 
-  // Display settings state
-  const [nearbyLimit, setNearbyLimit] = useState(displaySettings.nearbyStopsLimit);
-  const [timeWindow, setTimeWindow] = useState(displaySettings.timeWindowMinutes);
+  // Display settings state (kept as strings so the user can freely edit,
+  // e.g. clear the field before typing a new number; clamped on save)
+  const [nearbyLimit, setNearbyLimit] = useState(String(displaySettings.nearbyStopsLimit));
+  const [timeWindow, setTimeWindow] = useState(String(displaySettings.timeWindowMinutes));
   const [displaySaved, setDisplaySaved] = useState(false);
 
   // Networks state
@@ -107,8 +108,19 @@ export default function Settings({ starred, manualCoords, displaySettings, onSta
     setTimeout(() => setCoordsSaved(false), 2000);
   };
 
+  const clamp = (value: string, min: number, max: number, fallback: number) => {
+    const parsed = parseInt(value, 10);
+    if (Number.isNaN(parsed)) return fallback;
+    return Math.max(min, Math.min(max, parsed));
+  };
+
   const saveDisplay = () => {
-    const settings: DisplaySettings = { nearbyStopsLimit: nearbyLimit, timeWindowMinutes: timeWindow };
+    const settings: DisplaySettings = {
+      nearbyStopsLimit: clamp(nearbyLimit, 1, 20, displaySettings.nearbyStopsLimit),
+      timeWindowMinutes: clamp(timeWindow, 15, 180, displaySettings.timeWindowMinutes),
+    };
+    setNearbyLimit(String(settings.nearbyStopsLimit));
+    setTimeWindow(String(settings.timeWindowMinutes));
     saveDisplaySettings(settings);
     onDisplaySettingsChange(settings);
     setDisplaySaved(true);
@@ -219,23 +231,27 @@ export default function Settings({ starred, manualCoords, displaySettings, onSta
           
           <div className="coords-form">
             <div className="coord-input-group">
-              <label>Nearby Stops</label>
+              <label>Nearby Stops (1–20)</label>
               <input
                 type="number"
+                inputMode="numeric"
                 min="1"
                 max="20"
                 value={nearbyLimit}
-                onChange={(e) => { setNearbyLimit(Math.max(1, Math.min(20, parseInt(e.currentTarget.value) || 1))); setDisplaySaved(false); }}
+                onChange={(e) => { setNearbyLimit(e.currentTarget.value); setDisplaySaved(false); }}
+                onBlur={() => setNearbyLimit(String(clamp(nearbyLimit, 1, 20, displaySettings.nearbyStopsLimit)))}
               />
             </div>
             <div className="coord-input-group">
-              <label>Time Window (min)</label>
+              <label>Time Window (15–180 min)</label>
               <input
                 type="number"
+                inputMode="numeric"
                 min="15"
                 max="180"
                 value={timeWindow}
-                onChange={(e) => { setTimeWindow(Math.max(15, Math.min(180, parseInt(e.currentTarget.value) || 60))); setDisplaySaved(false); }}
+                onChange={(e) => { setTimeWindow(e.currentTarget.value); setDisplaySaved(false); }}
+                onBlur={() => setTimeWindow(String(clamp(timeWindow, 15, 180, displaySettings.timeWindowMinutes)))}
               />
             </div>
           </div>
