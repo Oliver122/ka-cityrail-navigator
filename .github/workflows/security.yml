@@ -47,25 +47,22 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
 
-      - name: Setup Node.js
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
-        with:
-          node-version: '20'
-          cache: 'npm'
+      - name: Setup Node.js and npm
+        uses: ./.github/actions/setup-node-npm
 
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
+        uses: ./.github/actions/setup-rust
         with:
-          toolchain: stable
-
-      - name: Install JavaScript dependencies
-        run: npm ci
+          with-gtk: 'false'
+          cache-key-prefix: cargo-audit
 
       - name: NPM audit (high+)
         run: npm audit --audit-level=high
 
       - name: Install cargo-audit
-        run: cargo install cargo-audit --locked
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-audit
 
       - name: Cargo audit
         run: cargo audit --file src-tauri/Cargo.lock

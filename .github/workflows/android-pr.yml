@@ -1,0 +1,55 @@
+name: Android PR
+
+on:
+  pull_request:
+    branches: [development, main]
+    paths:
+      - 'src-tauri/**'
+      - 'scripts/patch-android-manifest.sh'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/android-pr.yml'
+      - '.github/actions/android-build/**'
+      - '.github/actions/setup-android/**'
+      - '.github/actions/setup-node-npm/**'
+      - '.github/actions/setup-rust/**'
+  workflow_dispatch:
+
+concurrency:
+  group: android-pr-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+
+      - name: Setup Node.js and npm
+        uses: ./.github/actions/setup-node-npm
+
+      - name: Setup Rust
+        uses: ./.github/actions/setup-rust
+        with:
+          rust-targets: 'aarch64-linux-android'
+          with-gtk: 'true'
+          cache-key-prefix: cargo-android
+
+      - name: Setup Android
+        uses: ./.github/actions/setup-android
+        id: android
+
+      - name: Build Android APK (unsigned, aarch64)
+        uses: ./.github/actions/android-build
+        with:
+          artifact: apk
+          targets: aarch64
+          signed: 'false'
+          ndk-home: ${{ steps.android.outputs.ndk-path }}

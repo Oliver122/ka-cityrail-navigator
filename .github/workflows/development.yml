@@ -1,4 +1,4 @@
-name: Dev Build
+name: Development
 
 on:
   push:
@@ -12,7 +12,7 @@ permissions:
   pull-requests: write
 
 concurrency:
-  group: dev-build-${{ github.ref }}
+  group: development-${{ github.ref }}
   cancel-in-progress: true
 
 env:
@@ -46,32 +46,33 @@ jobs:
         with:
           ref: ${{ needs.release-please.outputs.tag_name }}
 
-      - name: Setup build environment
-        uses: ./.github/actions/setup-environment
-        id: setup-env
+      - name: Setup Node.js and npm
+        uses: ./.github/actions/setup-node-npm
+
+      - name: Setup Rust
+        uses: ./.github/actions/setup-rust
         with:
           rust-targets: 'aarch64-linux-android'
+          with-gtk: 'true'
+          cache-key-prefix: cargo-android
+
+      - name: Setup Android
+        uses: ./.github/actions/setup-android
+        id: android
 
       - name: Build frontend
         run: npm run build
 
-      - name: Initialize Android project
-        run: npx tauri android init
-
-      - name: Patch Android manifest (WiFi permissions)
-        run: ./scripts/patch-android-manifest.sh
-
-      - name: Configure Android signing
-        uses: ./.github/actions/configure-android-signing
+      - name: Build Android APK (arm64, signed)
+        uses: ./.github/actions/android-build
         with:
+          artifact: apk
+          targets: aarch64
+          signed: 'true'
           key-alias: ${{ secrets.ANDROID_KEY_ALIAS }}
           key-password: ${{ secrets.ANDROID_KEY_PASSWORD }}
           keystore-base64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
-
-      - name: Build Android APK (arm64 only, signed)
-        run: npx tauri android build --apk --target aarch64
-        env:
-          NDK_HOME: ${{ steps.setup-env.outputs.ndk-path }}
+          ndk-home: ${{ steps.android.outputs.ndk-path }}
 
       - name: Prepare artifacts
         run: |
@@ -96,7 +97,3 @@ jobs:
             dev-artifacts/SHA256SUMS
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Cleanup keystore
-        if: always()
-        run: rm -f $RUNNER_TEMP/keystore.jks src-tauri/gen/android/keystore.properties

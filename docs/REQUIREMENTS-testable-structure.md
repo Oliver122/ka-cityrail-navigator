@@ -27,7 +27,7 @@ On execute, also write this same requirements body into repo as [`docs/REQUIREME
 | FE pure helpers | today private in [`src/App.tsx`](src/App.tsx) → `src/utils/*` | 3 |
 | FE types | `Departure` / trip types in App → [`src/types.ts`](src/types.ts) | 3 |
 | FE test runner | `package.json`, `vite.config.ts`, `*.test.ts` | 3 |
-| FE CI | `npm test` step in `pr-validation.yml` | 3 |
+| FE CI | `npm test` in `frontend.yml` | 3 |
 
 ### Out of scope (`REQ-OUT`)
 
@@ -39,7 +39,7 @@ On execute, also write this same requirements body into repo as [`docs/REQUIREME
 | REQ-OUT-4 | No E2E / Playwright / full App mount tests |
 | REQ-OUT-5 | No CSS / Settings UI redesign |
 | REQ-OUT-6 | No coverage % gates |
-| REQ-OUT-7 | No `dev-build.yml` / release APK pipeline changes (except they stay green) |
+| REQ-OUT-7 | No release APK pipeline behavior change beyond shared `android-build` action wiring |
 
 ---
 
@@ -61,9 +61,9 @@ Create [`.github/workflows/cargo-test.yml`](.github/workflows/cargo-test.yml):
 | clippy | `cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings` |
 | test | `cargo test --manifest-path src-tauri/Cargo.toml --all-features` |
 
-### REQ-CI-3 — No duplicate Rust gate in PR Validation
+### REQ-CI-3 — No duplicate Rust gate in Frontend / PR Validation
 
-[`pr-validation.yml`](.github/workflows/pr-validation.yml) does **not** re-run fmt/clippy/`cargo test`. It owns FE (`npm test` / build) + Android APK. Rust quality is owned by `cargo-test.yml` only.
+[`frontend.yml`](.github/workflows/frontend.yml) runs `npm test` / build only. [`android-pr.yml`](.github/workflows/android-pr.yml) owns path-filtered APK checks. Rust quality is owned by [`cargo-test.yml`](.github/workflows/cargo-test.yml) only.
 
 ### Gate 1
 
@@ -196,13 +196,14 @@ Fixtures = **sanitized** real-shaped JSON (no live network). Build fixtures from
 
 ### REQ-CI-4 — FE tests on PR
 
-Add to `pr-validation.yml` after setup / with FE build:
+[`frontend.yml`](.github/workflows/frontend.yml) runs:
 
 ```yaml
 - run: npm test
+- run: npm run build
 ```
 
-(Push `cargo-test.yml` stays Rust-only.)
+(`cargo-test.yml` stays Rust-only.)
 
 ### Gate 3
 
