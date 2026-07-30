@@ -105,3 +105,146 @@ pub fn upsert_network(conn: &mut SqliteConnection, net: NewNetwork) -> QueryResu
 pub fn delete_network(conn: &mut SqliteConnection, ssid_val: &str) -> QueryResult<usize> {
     diesel::delete(networks::table.filter(networks::ssid.eq(ssid_val))).execute(conn)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn temp_conn() -> (tempfile::TempDir, SqliteConnection) {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("test.db");
+        let conn = establish_connection(path.to_str().expect("utf8 path"));
+        (dir, conn)
+    }
+
+    #[test]
+    fn upsert_stop_then_list() {
+        let (_dir, mut conn) = temp_conn();
+        upsert_stop(
+            &mut conn,
+            NewStop {
+                id: "s1",
+                name: "Marktplatz",
+                longitude: 8.4,
+                latitude: 49.0,
+            },
+        )
+        .unwrap();
+        let stops = list_stops(&mut conn).unwrap();
+        assert_eq!(stops.len(), 1);
+        assert_eq!(stops[0].id, "s1");
+        assert_eq!(stops[0].name, "Marktplatz");
+        assert_eq!(stops[0].longitude, 8.4);
+        assert_eq!(stops[0].latitude, 49.0);
+    }
+
+    #[test]
+    fn upsert_stop_same_id_updates_name() {
+        let (_dir, mut conn) = temp_conn();
+        upsert_stop(
+            &mut conn,
+            NewStop {
+                id: "s1",
+                name: "Old",
+                longitude: 8.4,
+                latitude: 49.0,
+            },
+        )
+        .unwrap();
+        upsert_stop(
+            &mut conn,
+            NewStop {
+                id: "s1",
+                name: "New",
+                longitude: 8.5,
+                latitude: 49.1,
+            },
+        )
+        .unwrap();
+        let stops = list_stops(&mut conn).unwrap();
+        assert_eq!(stops.len(), 1);
+        assert_eq!(stops[0].name, "New");
+        assert_eq!(stops[0].longitude, 8.5);
+        assert_eq!(stops[0].latitude, 49.1);
+    }
+
+    #[test]
+    fn upsert_stops_two_ids() {
+        let (_dir, mut conn) = temp_conn();
+        upsert_stops(
+            &mut conn,
+            vec![
+                NewStop {
+                    id: "a",
+                    name: "A",
+                    longitude: 1.0,
+                    latitude: 2.0,
+                },
+                NewStop {
+                    id: "b",
+                    name: "B",
+                    longitude: 3.0,
+                    latitude: 4.0,
+                },
+            ],
+        )
+        .unwrap();
+        assert_eq!(list_stops(&mut conn).unwrap().len(), 2);
+    }
+
+    #[test]
+    fn upsert_network_then_list() {
+        let (_dir, mut conn) = temp_conn();
+        upsert_network(
+            &mut conn,
+            NewNetwork {
+                ssid: "HomeWiFi",
+                label: "Home",
+            },
+        )
+        .unwrap();
+        let nets = list_networks(&mut conn).unwrap();
+        assert_eq!(nets.len(), 1);
+        assert_eq!(nets[0].ssid, "HomeWiFi");
+        assert_eq!(nets[0].label, "Home");
+    }
+
+    #[test]
+    fn upsert_network_same_ssid_updates_label() {
+        let (_dir, mut conn) = temp_conn();
+        upsert_network(
+            &mut conn,
+            NewNetwork {
+                ssid: "HomeWiFi",
+                label: "Old",
+            },
+        )
+        .unwrap();
+        upsert_network(
+            &mut conn,
+            NewNetwork {
+                ssid: "HomeWiFi",
+                label: "New",
+            },
+        )
+        .unwrap();
+        let nets = list_networks(&mut conn).unwrap();
+        assert_eq!(nets.len(), 1);
+        assert_eq!(nets[0].label, "New");
+    }
+
+    #[test]
+    fn delete_network_removes_row() {
+        let (_dir, mut conn) = temp_conn();
+        upsert_network(
+            &mut conn,
+            NewNetwork {
+                ssid: "HomeWiFi",
+                label: "Home",
+            },
+        )
+        .unwrap();
+        delete_network(&mut conn, "HomeWiFi").unwrap();
+        assert!(list_networks(&mut conn).unwrap().is_empty());
+    }
+}

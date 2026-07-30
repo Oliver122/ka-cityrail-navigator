@@ -1953,6 +1953,7 @@ dependencies = [
  "tauri-build",
  "tauri-plugin-geolocation",
  "tauri-plugin-opener",
+ "tempfile",
 ]
 
 [[package]]
