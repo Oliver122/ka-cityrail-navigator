@@ -1,6 +1,6 @@
 [package]
 name = "ka-cityrail-navigator"
-version = "0.4.0" # x-release-please-version
+version = "0.5.0" # x-release-please-version
 description = "Real-time KVV departure board for Karlsruhe public transport"
 authors = ["oliver"]
 edition = "2021"

@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.0](https://github.com/Oliver122/ka-cityrail-navigator/compare/ka-cityrail-navigator-v0.4.0...ka-cityrail-navigator-v0.5.0) (2026-07-30)
+
+
+### Features
+
+* **fe:** add component lib and station viewers ([5c4a70f](https://github.com/Oliver122/ka-cityrail-navigator/commit/5c4a70fffe8bc0893ff4b114cdbe6b6a98b2d2f3))
+
 ## [0.4.0](https://github.com/Oliver122/ka-cityrail-navigator/compare/ka-cityrail-navigator-v0.3.1...ka-cityrail-navigator-v0.4.0) (2026-07-30)
 
 
