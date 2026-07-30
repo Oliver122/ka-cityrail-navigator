@@ -63,10 +63,10 @@ Lean setup pieces under `.github/actions/` (no mega `setup-environment`):
 
 Suggested settings for `development` / `main`:
 
-- Always: **PR / commit-lint**, **Frontend / frontend**
-- When present (path-filtered): **Cargo Test / rust**, **Android PR / apk**
+- Safe to require: **PR / commit-lint** — `pr.yml` has no path filter, so it always reports. On `release-please--*` branches the job is skipped by its `if:`, and GitHub counts a skipped job as passing.
+- Do **not** require: **Frontend / frontend**, **Cargo Test / rust**, **Android PR / apk**.
 
-Configure “required if present” / soft-required checks in GitHub so FE-only PRs are not blocked waiting for Android.
+Those three come from path-filtered workflows. When the filter does not match, GitHub creates no check run at all — and a required check that never reports stays pending forever. A docs-only PR would block on all three; a Rust-only PR would block on Frontend. GitHub has no “required if present” setting, so the filters and the required list have to agree.
 
 ## Secrets and variables
 
