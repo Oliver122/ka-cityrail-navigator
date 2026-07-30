@@ -20,7 +20,7 @@ On execute, also write this same requirements body into repo as [`docs/REQUIREME
 
 | Area | Files | Phase |
 |------|-------|-------|
-| CI Rust pipeline | `.github/workflows/cargo-test.yml` only (fmt/clippy/test on push+PR); not duplicated in PR Validation | 1 |
+| CI Rust pipeline | `.github/workflows/cargo-test.yml` only (fmt/clippy/test on push+PR); not duplicated in the PR lanes | 1 |
 | Pure Rust helpers | [`src-tauri/src/helpers.rs`](src-tauri/src/helpers.rs) | 2 test / 3 untouched unless bugfix |
 | SQLite repo | [`src-tauri/src/db.rs`](src-tauri/src/db.rs) | 2 test / 3 untouched unless bugfix |
 | KVV JSON→domain | logic today inside [`src-tauri/src/kvv.rs`](src-tauri/src/kvv.rs) → new `kvv_parse.rs` | 3 |
@@ -50,7 +50,7 @@ On execute, also write this same requirements body into repo as [`docs/REQUIREME
 Create [`.github/workflows/cargo-test.yml`](.github/workflows/cargo-test.yml):
 
 - **Triggers:** `push` and `pull_request` to `development` and `main`
-- **Path filter:** `src-tauri/**`, `.github/workflows/cargo-test.yml`
+- **Path filter:** `src-tauri/**`, `.github/workflows/cargo-test.yml`, `.github/actions/setup-rust/**`
 - **Must not** build Android APK (fast pipeline)
 
 ### REQ-CI-2 — Exact steps (fail job on any fail)
@@ -61,7 +61,7 @@ Create [`.github/workflows/cargo-test.yml`](.github/workflows/cargo-test.yml):
 | clippy | `cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings` |
 | test | `cargo test --manifest-path src-tauri/Cargo.toml --all-features` |
 
-### REQ-CI-3 — No duplicate Rust gate in Frontend / PR Validation
+### REQ-CI-3 — No duplicate Rust gate in the PR lanes
 
 [`frontend.yml`](.github/workflows/frontend.yml) runs `npm test` / build only. [`android-pr.yml`](.github/workflows/android-pr.yml) owns path-filtered APK checks. Rust quality is owned by [`cargo-test.yml`](.github/workflows/cargo-test.yml) only.
 
