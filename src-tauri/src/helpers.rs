@@ -99,3 +99,89 @@ pub fn trim_path_to_last_stop(raw_path: &str, stops: &[TripRouteStop]) -> String
     }
     pairs[..=best_idx].join(" ")
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn shorten_line_number_ice_with_suffix() {
+        assert_eq!(shorten_line_number("ICE 372 InterCityExpress"), "ICE 372");
+    }
+
+    #[test]
+    fn shorten_line_number_s_bahn_unchanged() {
+        assert_eq!(shorten_line_number("S1"), "S1");
+    }
+
+    #[test]
+    fn shorten_line_number_ic_with_suffix() {
+        assert_eq!(shorten_line_number("IC 123 Foo"), "IC 123");
+    }
+
+    #[test]
+    fn trip_code_from_realtime_trip_id_extracts_digits() {
+        assert_eq!(
+            trip_code_from_realtime_trip_id("prefixT0.1385suffix"),
+            Some("1385".to_string())
+        );
+    }
+
+    #[test]
+    fn trip_code_from_realtime_trip_id_missing_needle() {
+        assert_eq!(trip_code_from_realtime_trip_id("no-token-here"), None);
+    }
+
+    #[test]
+    fn parse_time_field_pads_hour_and_minute() {
+        assert_eq!(parse_time_field(&json!("9"), &json!("5")), "09:05");
+    }
+
+    #[test]
+    fn json_to_i64_string_number_and_junk() {
+        assert_eq!(json_to_i64(&json!("12")), 12);
+        assert_eq!(json_to_i64(&json!(12)), 12);
+        assert_eq!(json_to_i64(&json!("nope")), 0);
+        assert_eq!(json_to_i64(&json!(null)), 0);
+    }
+
+    #[test]
+    fn attr_value_finds_named_attr() {
+        let obj = json!({
+            "attrs": [
+                { "name": "other", "value": "x" },
+                { "name": "RealtimeTripId", "value": "abc" }
+            ]
+        });
+        assert_eq!(attr_value(&obj, "RealtimeTripId"), Some("abc".to_string()));
+        assert_eq!(attr_value(&obj, "missing"), None);
+        assert_eq!(attr_value(&json!({}), "RealtimeTripId"), None);
+    }
+
+    #[test]
+    fn haversine_km_near_karlsruhe_about_one_km() {
+        let lat1 = 49.009_f64;
+        let lon1 = 8.404_f64;
+        // ~1 km north: 1/111.32 ≈ 0.008984°
+        let lat2 = lat1 + 1.0 / 111.32;
+        let lon2 = lon1;
+        let d = haversine_km(lat1, lon1, lat2, lon2);
+        assert!((d - 1.0).abs() < 0.05, "expected ~1 km, got {d}");
+    }
+
+    #[test]
+    fn trim_path_to_last_stop_cuts_at_closest_point() {
+        let stops = vec![TripRouteStop {
+            id: "1".into(),
+            name: "End".into(),
+            platform: String::new(),
+            arrival_time: String::new(),
+            departure_time: String::new(),
+            longitude: Some(8.5),
+            latitude: Some(49.1),
+        }];
+        let path = "8.4,49.0 8.5,49.1 8.6,49.2";
+        assert_eq!(trim_path_to_last_stop(path, &stops), "8.4,49.0 8.5,49.1");
+    }
+}
