@@ -199,10 +199,15 @@ You never edit version numbers manually — release-please owns them.
 
 | Workflow | Trigger | What it does |
 |----------|---------|--------------|
-| **PR Validation** | Pull request to `development` or `main` | Validates PR title (Conventional Commits), builds frontend, runs Rust format/lint/tests, builds Android APK (aarch64) |
-| **Dev Build** | Push to `development` | release-please manages a pre-release PR; on merge, tags `vX.Y.Z-dev.N`, builds signed arm64 APK, publishes as GitHub pre-release |
+| **PR** | Pull request to `development` or `main` | Validates PR title (Conventional Commits) |
+| **Frontend** | Pull request touching frontend sources or build config | Runs `npm test` and builds the frontend |
+| **Cargo Test** | Push/PR touching `src-tauri/` | Runs Rust format check, Clippy (`-D warnings`) and tests |
+| **Android PR** | Pull request touching `src-tauri/` or Android build inputs, or manual dispatch | Builds an unsigned aarch64 APK as a smoke test |
+| **Development** | Push to `development` | release-please manages a pre-release PR; on merge, tags `vX.Y.Z-dev.N`, builds signed arm64 APK, publishes as GitHub pre-release |
 | **Release** | Push to `main` | release-please manages a stable release PR; on merge, tags `vX.Y.Z`, builds signed AAB + APK in parallel, publishes release assets, optionally uploads AAB to Play Store |
 | **Security Scans** | PR/push to `development` or `main`, weekly schedule, manual | Runs CodeQL (JS + Rust) and dependency audits (`npm audit`, `cargo audit`) |
+
+Path filters, composite actions and branch-protection notes: [`.github/CI-README.md`](.github/CI-README.md).
 
 ---
 
