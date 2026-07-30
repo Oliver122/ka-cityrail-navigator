@@ -1,5 +1,40 @@
 # Changelog
 
+## [0.4.0](https://github.com/Oliver122/ka-cityrail-navigator/compare/ka-cityrail-navigator-v0.3.1...ka-cityrail-navigator-v0.4.0) (2026-07-30)
+
+
+### Features
+
+* implement Transit Editorial UI design system ([c638372](https://github.com/Oliver122/ka-cityrail-navigator/commit/c638372f21992031b38717ac7b35d282d642059b))
+* Transit Editorial UI Design System ([d729682](https://github.com/Oliver122/ka-cityrail-navigator/commit/d72968244437f19183cdc475232fcc3e75871fc3))
+
+
+### Bug Fixes
+
+* **android:** read WiFi SSID via WifiManager JNI ([9f02fbf](https://github.com/Oliver122/ka-cityrail-navigator/commit/9f02fbf027eb2a811aa0f6b04688ca8b7bfdab03))
+* **android:** robust WiFi detection with OOM and crash prevention ([#30](https://github.com/Oliver122/ka-cityrail-navigator/issues/30)) ([6ea301e](https://github.com/Oliver122/ka-cityrail-navigator/commit/6ea301e724e6e57b08cd8d8a6cbeb4d08247dca5))
+* **android:** robust WiFi detection with OOM and crash prevention ([#30](https://github.com/Oliver122/ka-cityrail-navigator/issues/30)) ([d5a8158](https://github.com/Oliver122/ka-cityrail-navigator/commit/d5a8158706e17725690adbc72b498656017c2cae))
+* apply rustfmt to shorten_line_number ([#28](https://github.com/Oliver122/ka-cityrail-navigator/issues/28)) ([75ad5f9](https://github.com/Oliver122/ka-cityrail-navigator/commit/75ad5f96a5bc520ab5a9edd310fe0c3d8c80af93))
+* apply rustfmt to shorten_line_number ([#28](https://github.com/Oliver122/ka-cityrail-navigator/issues/28)) ([7680fae](https://github.com/Oliver122/ka-cityrail-navigator/commit/7680fae771b1795e37ebaf15a704e181eaa45cd5))
+* **ci:** correct action-semantic-pull-request hash (v6.1.1) ([ac701bf](https://github.com/Oliver122/ka-cityrail-navigator/commit/ac701bf2663429df6503a7b0e34dac25e5d39edd))
+* **ci:** correct semantic-pull-request hash and sync release baseline ([d54287f](https://github.com/Oliver122/ka-cityrail-navigator/commit/d54287ffb8ca359f2380b551a905bae26b5b51b2))
+* **departures:** group departures by platform within station card ([211440f](https://github.com/Oliver122/ka-cityrail-navigator/commit/211440fdc8fea262fc02564aa0ff56051e97bbe5))
+* **deps:** clear npm high audit findings ([1d74adf](https://github.com/Oliver122/ka-cityrail-navigator/commit/1d74adf01d0937c9b7debaa7c5aa82e50e1b0dbb))
+* **deps:** update rustls-webpki 0.103.10 → 0.103.12 ([#26](https://github.com/Oliver122/ka-cityrail-navigator/issues/26)) ([01ce9de](https://github.com/Oliver122/ka-cityrail-navigator/commit/01ce9de42955ac3e34a5eca0371144b6bbf5921b))
+* **deps:** update rustls-webpki 0.103.10 → 0.103.12 ([#26](https://github.com/Oliver122/ka-cityrail-navigator/issues/26)) ([a93d8e4](https://github.com/Oliver122/ka-cityrail-navigator/commit/a93d8e45481e2aa948a3486db3108845bc87c4eb))
+* **settings:** allow free editing of numeric display inputs ([7b1c557](https://github.com/Oliver122/ka-cityrail-navigator/commit/7b1c557b424539f1d253932d4c5bfc8be3e7e5e8))
+* truncate verbose long-distance line numbers ([#24](https://github.com/Oliver122/ka-cityrail-navigator/issues/24)) ([95366f1](https://github.com/Oliver122/ka-cityrail-navigator/commit/95366f12cd832aa4c0716d0cc99fddacf80e0435))
+* truncate verbose long-distance line numbers ([#24](https://github.com/Oliver122/ka-cityrail-navigator/issues/24)) ([27a5656](https://github.com/Oliver122/ka-cityrail-navigator/commit/27a5656fa64690e57a6dd59870ed95ce7e489b35))
+* use servingLine.key as tripCode for stop sequence API ([#23](https://github.com/Oliver122/ka-cityrail-navigator/issues/23)) ([4f93625](https://github.com/Oliver122/ka-cityrail-navigator/commit/4f93625ac4734520672b642d59f807251d0555f6))
+* use servingLine.key as tripCode for stop sequence API ([#23](https://github.com/Oliver122/ka-cityrail-navigator/issues/23)) ([29a279f](https://github.com/Oliver122/ka-cityrail-navigator/commit/29a279fc145f9a29a892ea1f9eca817d75be05d0))
+* use strip_prefix instead of manual starts_with+slice ([#29](https://github.com/Oliver122/ka-cityrail-navigator/issues/29)) ([95439f5](https://github.com/Oliver122/ka-cityrail-navigator/commit/95439f5c701c8cf507c57cbb22244cf8fc3127f7))
+* use strip_prefix instead of manual starts_with+slice ([#29](https://github.com/Oliver122/ka-cityrail-navigator/issues/29)) ([c68d411](https://github.com/Oliver122/ka-cityrail-navigator/commit/c68d4111ec43b1c0f848f5901e8652cd899894aa))
+
+
+### Refactoring
+
+* extract testable utils and kvv parse ([dd81c27](https://github.com/Oliver122/ka-cityrail-navigator/commit/dd81c2795677a69212b524d4a186d6d068040630))
+
 ## [0.3.1](https://github.com/Oliver122/ka-cityrail-navigator/compare/ka-cityrail-navigator-v0.3.0...ka-cityrail-navigator-v0.3.1) (2026-07-18)
 
 
