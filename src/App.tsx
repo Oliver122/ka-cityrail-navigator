@@ -11,22 +11,20 @@ import {
   TripStopSeqResponse,
 } from "./types";
 import { haversineKm, formatDist } from "./utils/geo";
-import { formatCountdown, kvDateTimeToDisplay } from "./utils/time";
+import { kvDateTimeToDisplay } from "./utils/time";
 import { withTimeout } from "./utils/async";
 import { createMockRouteStops } from "./utils/mockRoute";
-import { 
-  BottomNav, 
-  LineBadge,
-  ProximityMap,
-  WifiIcon, 
-  EthernetIcon, 
-  SearchIcon, 
-  FilterIcon, 
-  RefreshIcon,
-  LocationIcon,
-  ChevronDownIcon,
-  ChevronUpIcon,
-  StarIcon,
+import {
+  BottomNav,
+  AppHeader,
+  SearchBar,
+  ErrorBanner,
+  ManualModeBanner,
+  LoadingScreen,
+  StationCard,
+  NetworkStatusCard,
+  ProximityMapCard,
+  getStationViewer,
 } from "./components";
 import type { MapBounds } from "./components";
 import "./components/ProximityMap.css";
@@ -34,30 +32,28 @@ import Settings from "./Settings";
 import DepartureDetails from "./DepartureDetails";
 import "./App.css";
 
-// Page order for swipe navigation
 const PAGE_ORDER: AppPage[] = ["departures", "settings"];
-
-/** Max time (ms) to wait for a route/invoke call before giving up. */
 const INVOKE_TIMEOUT_MS = 12_000;
+/** Background / silent data refresh interval (1:30). */
+const DATA_REFRESH_MS = 90_000;
+const SWIPE_THRESHOLD = 80;
 
-/** Group departures by platform (Gleis), sorted numerically ("2" before "10"). */
-function groupByPlatform(deps: Departure[]): [string, Departure[]][] {
-  const groups = new Map<string, Departure[]>();
-  for (const dep of deps) {
-    const key = dep.platform.trim();
-    const list = groups.get(key);
-    if (list) list.push(dep);
-    else groups.set(key, [dep]);
+function scrollTopNearZero(target: EventTarget | null): boolean {
+  if (target instanceof Element) {
+    let node: Element | null = target;
+    while (node) {
+      const style = window.getComputedStyle(node);
+      const canScroll =
+        (style.overflowY === "auto" || style.overflowY === "scroll" || node === document.documentElement)
+        && node.scrollHeight > node.clientHeight + 1;
+      if (canScroll) return node.scrollTop <= 2;
+      node = node.parentElement;
+    }
   }
-  return [...groups.entries()].sort(([a], [b]) =>
-    a.localeCompare(b, undefined, { numeric: true })
-  );
+  return (window.scrollY || document.documentElement.scrollTop || 0) <= 2;
 }
 
-// ── App ───────────────────────────────────────────────────────────────────────
-
 function App() {
-  // Prevent unhandled promise rejections from crashing the WebView
   useEffect(() => {
     const handler = (e: PromiseRejectionEvent) => {
       e.preventDefault();
@@ -80,93 +76,45 @@ function App() {
   const [manualMode, setManualMode] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<Stop[]>([]);
+  const [searching, setSearching] = useState(false);
+  const [searchError, setSearchError] = useState<string | null>(null);
+  const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [selectedDeparture, setSelectedDeparture] = useState<DepartureDetail | null>(null);
   const [routeLoadingId, setRouteLoadingId] = useState<string | null>(null);
   const [routeLoadError, setRouteLoadError] = useState<string | null>(null);
   const [initialLoading, setInitialLoading] = useState(true);
-  
-  // Track last fetched bounds to avoid duplicate requests
+
   const lastBoundsRef = useRef<string>("");
-  
-  // Swipe gesture handling
-  const touchStartRef = useRef<{ x: number; y: number } | null>(null);
-  const SWIPE_THRESHOLD = 80;
-  
+  const touchStartRef = useRef<{ x: number; y: number; target: EventTarget | null } | null>(null);
+  const silentRefreshInFlight = useRef(false);
+  const userLocationRef = useRef(userLocation);
+  userLocationRef.current = userLocation;
+  const initialLoadingRef = useRef(initialLoading);
+  initialLoadingRef.current = initialLoading;
+  const pageRef = useRef(page);
+  pageRef.current = page;
+
   const handleTouchStart = useCallback((e: TouchEvent) => {
-    touchStartRef.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+    touchStartRef.current = {
+      x: e.touches[0].clientX,
+      y: e.touches[0].clientY,
+      target: e.target,
+    };
   }, []);
-  
-  const handleTouchEnd = useCallback((e: TouchEvent) => {
-    if (!touchStartRef.current) return;
-    const deltaX = e.changedTouches[0].clientX - touchStartRef.current.x;
-    const deltaY = e.changedTouches[0].clientY - touchStartRef.current.y;
-    touchStartRef.current = null;
-    
-    // Only trigger if horizontal swipe is dominant
-    if (Math.abs(deltaX) < SWIPE_THRESHOLD || Math.abs(deltaY) > Math.abs(deltaX)) return;
-    
-    // Skip swipe navigation on details page (use back button instead)
-    if (page === "details") return;
-    
-    const currentIndex = PAGE_ORDER.indexOf(page);
-    if (deltaX < 0 && currentIndex < PAGE_ORDER.length - 1) {
-      // Swipe left -> next page
-      setPage(PAGE_ORDER[currentIndex + 1]);
-    } else if (deltaX > 0 && currentIndex > 0) {
-      // Swipe right -> previous page
-      setPage(PAGE_ORDER[currentIndex - 1]);
+
+  const loadFrom = useCallback(async (
+    latitude: number,
+    longitude: number,
+    opts: { silent?: boolean } = {},
+  ) => {
+    const silent = opts.silent === true;
+    if (!silent) {
+      setUserLocation({ lat: latitude, lon: longitude });
+      setError(null);
+    } else {
+      setUserLocation((prev) => prev ?? { lat: latitude, lon: longitude });
     }
-  }, [page]);
-
-  // Fetch stops within map bounds
-  const handleMapBoundsChange = useCallback(async (bounds: MapBounds) => {
-    // Create a key to detect if bounds significantly changed
-    const boundsKey = `${bounds.center.lat.toFixed(4)},${bounds.center.lon.toFixed(4)},${bounds.radiusKm.toFixed(2)}`;
-    if (boundsKey === lastBoundsRef.current) return;
-    lastBoundsRef.current = boundsKey;
-    
-    setMapLoading(true);
-    try {
-      // Fetch stops for the visible map area (increased limit for map view)
-      const stops = await invoke<Stop[]>("fetch_stops_near", {
-        latitude: bounds.center.lat,
-        longitude: bounds.center.lon,
-        radiusKm: Math.min(bounds.radiusKm * 1.5, 10), // Cap at 10km
-        limit: 50,
-      });
-      setMapStops(stops);
-    } catch (e) {
-      console.error("Failed to fetch map stops:", e);
-    } finally {
-      setMapLoading(false);
-    }
-  }, []);
-
-  const toggleStar = useCallback((stop: Stop) => {
-    setStarredStops((prev) => {
-      const next = prev.some((s) => s.id === stop.id)
-        ? prev.filter((s) => s.id !== stop.id)
-        : [...prev, stop];
-      saveStarred(next);
-      return next;
-    });
-  }, []);
-
-  const handleStarredChange = useCallback((stops: Stop[]) => {
-    setStarredStops(stops);
-  }, []);
-
-  const handleCoordsChange = useCallback((coords: ManualCoords) => {
-    setManualCoords(coords);
-  }, []);
-
-  const handleDisplaySettingsChange = useCallback((settings: DisplaySettings) => {
-    setDisplaySettings(settings);
-  }, []);
-
-  const loadFrom = useCallback(async (latitude: number, longitude: number) => {
-    setUserLocation({ lat: latitude, lon: longitude });
-    setError(null);
     try {
       const settings = loadDisplaySettings();
       const nearby = await invoke<Stop[]>("fetch_stops_near", {
@@ -174,7 +122,6 @@ function App() {
       });
       setNearbyStops(nearby);
 
-      // Collect network-pinned stops so their departures are loaded too
       let netStops: Stop[] = [];
       try {
         const net = await withTimeout(
@@ -212,9 +159,94 @@ function App() {
         )
       );
       setDepartures(Object.fromEntries(results));
+      if (silent) setError(null);
     } catch (e) {
-      setError(String(e));
+      if (!silent) setError(String(e));
+      else console.warn("Silent data refresh failed:", e);
     }
+  }, []);
+
+  const refreshDataSilent = useCallback(async () => {
+    if (silentRefreshInFlight.current || initialLoadingRef.current) return;
+    silentRefreshInFlight.current = true;
+    try {
+      const loc = userLocationRef.current ?? loadManualCoords();
+      await loadFrom(loc.lat, loc.lon, { silent: true });
+    } finally {
+      silentRefreshInFlight.current = false;
+    }
+  }, [loadFrom]);
+
+  const handleTouchEnd = useCallback((e: TouchEvent) => {
+    if (!touchStartRef.current) return;
+    const deltaX = e.changedTouches[0].clientX - touchStartRef.current.x;
+    const deltaY = e.changedTouches[0].clientY - touchStartRef.current.y;
+    const startTarget = touchStartRef.current.target;
+    touchStartRef.current = null;
+
+    // Pull down at top of list → silent data refresh (no spinner / layout reset)
+    if (
+      pageRef.current === "departures"
+      && deltaY >= SWIPE_THRESHOLD
+      && Math.abs(deltaY) > Math.abs(deltaX)
+      && scrollTopNearZero(startTarget)
+    ) {
+      void refreshDataSilent();
+      return;
+    }
+
+    if (Math.abs(deltaX) < SWIPE_THRESHOLD || Math.abs(deltaY) > Math.abs(deltaX)) return;
+    if (pageRef.current === "details") return;
+
+    const currentIndex = PAGE_ORDER.indexOf(pageRef.current);
+    if (deltaX < 0 && currentIndex < PAGE_ORDER.length - 1) {
+      setPage(PAGE_ORDER[currentIndex + 1]);
+    } else if (deltaX > 0 && currentIndex > 0) {
+      setPage(PAGE_ORDER[currentIndex - 1]);
+    }
+  }, [refreshDataSilent]);
+
+  const handleMapBoundsChange = useCallback(async (bounds: MapBounds) => {
+    const boundsKey = `${bounds.center.lat.toFixed(4)},${bounds.center.lon.toFixed(4)},${bounds.radiusKm.toFixed(2)}`;
+    if (boundsKey === lastBoundsRef.current) return;
+    lastBoundsRef.current = boundsKey;
+
+    setMapLoading(true);
+    try {
+      const stops = await invoke<Stop[]>("fetch_stops_near", {
+        latitude: bounds.center.lat,
+        longitude: bounds.center.lon,
+        radiusKm: Math.min(bounds.radiusKm * 1.5, 10),
+        limit: 50,
+      });
+      setMapStops(stops);
+    } catch (e) {
+      console.error("Failed to fetch map stops:", e);
+    } finally {
+      setMapLoading(false);
+    }
+  }, []);
+
+  const toggleStar = useCallback((stop: Stop) => {
+    setStarredStops((prev) => {
+      const next = prev.some((s) => s.id === stop.id)
+        ? prev.filter((s) => s.id !== stop.id)
+        : [...prev, stop];
+      saveStarred(next);
+      return next;
+    });
+  }, []);
+
+  const handleStarredChange = useCallback((stops: Stop[]) => {
+    setStarredStops(stops);
+  }, []);
+
+  const handleCoordsChange = useCallback((coords: ManualCoords) => {
+    setManualCoords(coords);
+  }, []);
+
+  const handleDisplaySettingsChange = useCallback((settings: DisplaySettings) => {
+    setDisplaySettings(settings);
   }, []);
 
   const load = useCallback(() => {
@@ -235,7 +267,6 @@ function App() {
         setManualMode(false);
         await loadFrom(pos.coords.latitude, pos.coords.longitude);
       } catch {
-        // GPS failed — silently fall back to saved manual coords
         const saved = loadManualCoords();
         setManualMode(true);
         await loadFrom(saved.lat, saved.lon);
@@ -279,7 +310,16 @@ function App() {
 
   useEffect(() => { load(); }, [load]);
 
-  // Poll network status every 15 seconds (with timeout so it never hangs)
+  // Silent background refresh every 1:30 — data only (keeps collapse / search / scroll)
+  useEffect(() => {
+    if (initialLoading) return;
+    const id = setInterval(() => {
+      if (pageRef.current !== "departures") return;
+      void refreshDataSilent();
+    }, DATA_REFRESH_MS);
+    return () => clearInterval(id);
+  }, [initialLoading, refreshDataSilent]);
+
   useEffect(() => {
     const check = async () => {
       try {
@@ -306,6 +346,80 @@ function App() {
     return () => clearInterval(id);
   }, []);
 
+  useEffect(() => {
+    if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
+    const q = searchQuery.trim();
+    if (q.length < 2) {
+      setSearchResults([]);
+      setSearching(false);
+      setSearchError(null);
+      return;
+    }
+
+    setSearching(true);
+    setSearchError(null);
+    searchDebounceRef.current = setTimeout(async () => {
+      try {
+        const [dbResults, apiResults] = await Promise.allSettled([
+          invoke<Stop[]>("search_stops_db", { query: q }),
+          invoke<Stop[]>("search_stops", { query: q }),
+        ]);
+        const db = dbResults.status === "fulfilled" ? dbResults.value : [];
+        const api = apiResults.status === "fulfilled" ? apiResults.value : [];
+        const seen = new Set<string>();
+        const merged: Stop[] = [];
+        for (const s of [...db, ...api]) {
+          if (!seen.has(s.id)) {
+            seen.add(s.id);
+            merged.push(s);
+          }
+        }
+        setSearchResults(merged);
+      } catch (e) {
+        setSearchError(String(e));
+        setSearchResults([]);
+      } finally {
+        setSearching(false);
+      }
+    }, 400);
+
+    return () => {
+      if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
+    };
+  }, [searchQuery]);
+
+  // Fetch departures for global search hits (temp stations on departures page)
+  useEffect(() => {
+    const q = searchQuery.trim();
+    if (q.length < 2 || searchResults.length === 0) return;
+
+    let cancelled = false;
+    (async () => {
+      const settings = loadDisplaySettings();
+      const targets = searchResults.slice(0, 12);
+      const results = await Promise.all(
+        targets.map((s) =>
+          withTimeout(
+            invoke<Departure[]>("fetch_departures", {
+              stopId: s.id,
+              timeWindowMinutes: settings.timeWindowMinutes,
+            }),
+            INVOKE_TIMEOUT_MS,
+            `Search departures ${s.id}`,
+          )
+            .then((deps) => [s.id, deps] as [string, Departure[]])
+            .catch(() => [s.id, []] as [string, Departure[]])
+        )
+      );
+      if (cancelled) return;
+      setDepartures((prev) => ({ ...prev, ...Object.fromEntries(results) }));
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [searchQuery, searchResults]);
+
   const sortByDist = (arr: Stop[]) =>
     userLocation
       ? [...arr].sort((a, b) =>
@@ -314,26 +428,21 @@ function App() {
         )
       : arr;
 
-  // Build display list: network-pinned first, then starred, then nearby (deduped)
   const networkPinnedIds = new Set(networkStops.map((s) => s.id));
   const starredIds = new Set(starredStops.map((s) => s.id));
   const starredNotPinned = starredStops.filter((s) => !networkPinnedIds.has(s.id));
   const nearbyOnly = nearbyStops.filter((s) => !starredIds.has(s.id) && !networkPinnedIds.has(s.id));
 
-  // Filter by search query
-  const filterBySearch = (stops: Stop[]) => {
-    if (!searchQuery.trim()) return stops;
-    const q = searchQuery.toLowerCase();
-    return stops.filter((s) => s.name.toLowerCase().includes(q));
-  };
-
-  const displayStops = filterBySearch([
+  const homeStops = [
     ...sortByDist(networkStops),
     ...sortByDist(starredNotPinned),
     ...nearbyOnly,
-  ]);
+  ];
+  const homeStopIds = new Set(homeStops.map((s) => s.id));
 
-  // Handle departure click: load full stop sequence, then open details
+  const searchActive = searchQuery.trim().length >= 2;
+  const displayStops = searchActive ? searchResults : homeStops;
+
   const handleDepartureClick = async (stop: Stop, dep: Departure) => {
     const detailId = `${stop.id}-${dep.line}-${dep.planned_time}`;
     setRouteLoadError(null);
@@ -406,7 +515,6 @@ function App() {
     }
   };
 
-  // Handle navigation
   const handleNavigate = (newPage: AppPage) => {
     if (newPage === "departures") {
       setSelectedDeparture(null);
@@ -414,7 +522,6 @@ function App() {
     setPage(newPage);
   };
 
-  // Settings page
   if (page === "settings") {
     return (
       <div onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd}>
@@ -431,12 +538,11 @@ function App() {
     );
   }
 
-  // Departure Details page
   if (page === "details" && selectedDeparture) {
     return (
       <>
-        <DepartureDetails 
-          departure={selectedDeparture} 
+        <DepartureDetails
+          departure={selectedDeparture}
           onBack={() => { setSelectedDeparture(null); setPage("departures"); }}
         />
         <BottomNav currentPage={page} onNavigate={handleNavigate} />
@@ -444,238 +550,108 @@ function App() {
     );
   }
 
-  // Initial loading screen
   if (initialLoading) {
     return (
       <main className="app">
-        <div className="loading-screen">
-          <div className="loading-logo">
-            <span className="logo-text">K2V</span>
-            <span className="logo-subtitle">CityRail</span>
-          </div>
-          <div className="loading-spinner">
-            <RefreshIcon />
-          </div>
-          <p className="loading-text">Loading nearby stations...</p>
-        </div>
+        <LoadingScreen />
         <BottomNav currentPage={page} onNavigate={handleNavigate} />
       </main>
     );
   }
 
-  // Main departures page
   return (
     <div onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd}>
       <main className="app">
-        {/* Header */}
-        <header className="app-header">
-          <div className="header-top">
-            <div className="logo">
-              <span className="logo-text">K2V</span>
-              <span className="logo-subtitle">CityRail</span>
-            </div>
-            <div className="header-status">
-              {knownNetwork ? (
-                <div className="connection-indicator connected">
-                  {connType === "wifi" ? <WifiIcon /> : <EthernetIcon />}
-                  <span>{knownNetwork.label}</span>
-                </div>
-              ) : (
-                <div className="connection-indicator">
-                  <WifiIcon />
-                  <span>Offline</span>
-                </div>
-              )}
-              <button 
-                className={`refresh-button${refreshing ? " refreshing" : ""}`} 
-                onClick={load}
-                disabled={refreshing}
-              >
-                <RefreshIcon />
-              </button>
-            </div>
-          </div>
-          
-          {/* Search Bar */}
-          <div className="search-bar">
-            <SearchIcon className="search-icon" />
-            <input
-              type="text"
-              placeholder="Search stations..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-            />
-            <button className="filter-button">
-              <FilterIcon />
-            </button>
-          </div>
-        </header>
+        <AppHeader
+          connected={!!knownNetwork}
+          connType={connType}
+          connectionLabel={knownNetwork ? knownNetwork.label : "Offline"}
+          refreshing={refreshing}
+          onRefresh={load}
+        >
+          <SearchBar
+            value={searchQuery}
+            onChange={setSearchQuery}
+            searching={searching}
+          />
+        </AppHeader>
 
-        {/* Content */}
         <div className="app-content">
-          {error && (
-            <div className="error-banner">
-              <span>{error}</span>
-            </div>
+          {error && <ErrorBanner message={error} />}
+          {routeLoadError && <ErrorBanner message={routeLoadError} />}
+          {searchError && <ErrorBanner message={searchError} />}
+          {manualMode && !searchActive && (
+            <ManualModeBanner onChangeLocation={() => setPage("settings")} />
           )}
-          {routeLoadError && (
-            <div className="error-banner">
-              <span>{routeLoadError}</span>
-            </div>
-          )}
-
-          {manualMode && (
-            <div className="manual-mode-banner">
-              <LocationIcon />
-              <span>Using manual location</span>
-              <button onClick={() => setPage("settings")}>Change</button>
+          {searchActive && (
+            <div className="search-results-banner">
+              {searching
+                ? "Searching all stations…"
+                : `${searchResults.length} station${searchResults.length !== 1 ? "s" : ""} · clear search to return home`}
             </div>
           )}
 
-          {/* Station Cards */}
           <div className="stations-list">
+            {searchActive && !searching && searchResults.length === 0 && (
+              <p className="no-departures search-empty">No stations found</p>
+            )}
             {displayStops.map((stop) => {
               const deps = departures[stop.id] ?? [];
-              const isStarred = starredIds.has(stop.id);
-              const isNetworkPinned = networkPinnedIds.has(stop.id);
-              const isCollapsed = collapsedStops.has(stop.id);
               const dist = userLocation
                 ? haversineKm(userLocation.lat, userLocation.lon, stop.latitude, stop.longitude)
                 : null;
+              const Viewer = getStationViewer(displaySettings.stationViewerKind);
+              const isTemp = searchActive && !homeStopIds.has(stop.id);
 
               return (
-                <section key={stop.id} id={`station-${stop.id}`} className={`station-card${isStarred ? " starred" : ""}${isNetworkPinned ? " network-pinned" : ""}`}>
-                  <div className="station-header" onClick={() => toggleCollapse(stop.id)}>
-                    <button
-                      className={`star-button${isStarred ? " active" : ""}`}
-                      onClick={(e) => { e.stopPropagation(); toggleStar(stop); }}
-                    >
-                      <StarIcon filled={isStarred} />
-                    </button>
-                    {knownNetwork && (
-                      <button
-                        className={`network-pin-button${isNetworkPinned ? " active" : ""}`}
-                        onClick={(e) => { e.stopPropagation(); toggleNetworkPin(stop); }}
-                        title={isNetworkPinned ? "Remove network pin" : `Pin to ${knownNetwork.ssid}`}
-                      >
-                        <WifiIcon />
-                      </button>
-                    )}
-                    <div className="station-info">
-                      <span className="station-name">{stop.name}</span>
-                      {dist !== null && <span className="station-distance">{formatDist(dist)}</span>}
-                    </div>
-                    <button className="collapse-button">
-                      {isCollapsed ? <ChevronDownIcon /> : <ChevronUpIcon />}
-                    </button>
-                  </div>
-                  
-                  {!isCollapsed && (
-                    <div className="departures-table">
-                      {deps.length === 0 ? (
-                        <p className="no-departures">No departures</p>
-                      ) : (
-                        <>
-                          {/* Table Header */}
-                          <div className="departures-header">
-                            <span className="col-line">Line</span>
-                            <span className="col-destination">Destination</span>
-                            <span className="col-platform">Pl.</span>
-                            <span className="col-scheduled">Sched.</span>
-                            <span className="col-eta">ETA</span>
-                          </div>
-                          {/* Table Rows - Scrollable, grouped by platform */}
-                          <div className="departures-rows-wrapper">
-                            {(() => {
-                              const groups = groupByPlatform(deps);
-                              const showDividers = groups.length > 1;
-                              return groups.map(([platform, platformDeps]) => (
-                                <div key={platform || "no-platform"} className="platform-group">
-                                  {showDividers && (
-                                    <div className="platform-divider">
-                                      {platform ? `Gleis ${platform}` : "Ohne Gleisangabe"}
-                                    </div>
-                                  )}
-                                  {platformDeps.map((dep, i) => {
-                                    const eta = formatCountdown(dep.countdown, dep.real_time);
-                                    const isDelayed = dep.delay_minutes > 0;
-                                    const rowId = `${stop.id}-${dep.line}-${dep.planned_time}`;
-                                    const isRouteLoading = routeLoadingId === rowId;
-
-                                    return (
-                                      <div 
-                                        key={i} 
-                                        className="departure-row"
-                                        onClick={() => handleDepartureClick(stop, dep)}
-                                      >
-                                        <span className="col-line">
-                                          <LineBadge line={dep.line} motType={dep.mot_type} />
-                                        </span>
-                                        <span className="col-destination">{dep.direction}</span>
-                                        <span className="col-platform">{dep.platform || "-"}</span>
-                                        <span className="col-scheduled">{dep.planned_time}</span>
-                                        <span className={`col-eta ${isDelayed ? "delayed" : ""}`}>
-                                          {isRouteLoading
-                                            ? "…"
-                                            : isDelayed ? `+${dep.delay_minutes} min` : eta.text}
-                                        </span>
-                                      </div>
-                                    );
-                                  })}
-                                </div>
-                              ));
-                            })()}
-                          </div>
-                        </>
-                      )}
-                    </div>
-                  )}
-                </section>
+                <StationCard
+                  key={stop.id}
+                  stopId={stop.id}
+                  name={stop.name}
+                  distanceLabel={dist !== null ? formatDist(dist) : null}
+                  starred={starredIds.has(stop.id)}
+                  networkPinned={networkPinnedIds.has(stop.id)}
+                  showNetworkPin={!!knownNetwork}
+                  networkSsid={knownNetwork?.ssid}
+                  collapsed={collapsedStops.has(stop.id)}
+                  temporary={isTemp}
+                  onToggleCollapse={() => toggleCollapse(stop.id)}
+                  onToggleStar={() => toggleStar(stop)}
+                  onToggleNetworkPin={() => toggleNetworkPin(stop)}
+                >
+                  <Viewer
+                    stopId={stop.id}
+                    departures={deps}
+                    routeLoadingId={routeLoadingId}
+                    onDepartureClick={(dep) => handleDepartureClick(stop, dep)}
+                  />
+                </StationCard>
               );
             })}
           </div>
 
-          {/* Network Status Card */}
-          {knownNetwork && (
-            <div className="network-status-card">
-              <div className="network-status-header">
-                <span className="network-status-title">Network Status</span>
-                <span className="network-status-live">● Live</span>
-              </div>
-              <div className="network-status-info">
-                <span className="network-name">{knownNetwork.label}</span>
-                <span className="network-ssid">{knownNetwork.ssid}</span>
-              </div>
-              {networkStops.length > 0 && (
-                <div className="network-pinned-count">
-                  {networkStops.length} pinned station{networkStops.length !== 1 ? "s" : ""}
-                </div>
-              )}
-            </div>
+          {!searchActive && knownNetwork && (
+            <NetworkStatusCard
+              label={knownNetwork.label}
+              ssid={knownNetwork.ssid}
+              pinnedCount={networkStops.length}
+            />
           )}
 
-          {/* Proximity Map with OpenStreetMap */}
-          <div className="map-card">
-            <div className="map-header">
-              <span className="map-title">Proximity Map</span>
-              <span className="map-stop-count">
-                {mapLoading ? "Loading..." : `${mapStops.length} stops in view`}
-              </span>
-            </div>
-            <ProximityMap
-              userLocation={userLocation}
-              stops={mapStops}
-              loading={mapLoading}
-              onBoundsChange={handleMapBoundsChange}
-              onStopClick={(stop) => {
-                // Check if stop is in display list, if so scroll to it
-                const element = document.getElementById(`station-${stop.id}`);
-                if (element) {
-                  element.scrollIntoView({ behavior: "smooth", block: "center" });
-                }
-              }}
-            />
-          </div>
+          {!searchActive && (
+          <ProximityMapCard
+            userLocation={userLocation}
+            stops={mapStops}
+            loading={mapLoading}
+            onBoundsChange={handleMapBoundsChange}
+            onStopClick={(stop) => {
+              const element = document.getElementById(`station-${stop.id}`);
+              if (element) {
+                element.scrollIntoView({ behavior: "smooth", block: "center" });
+              }
+            }}
+          />
+          )}
         </div>
       </main>
       <BottomNav currentPage={page} onNavigate={handleNavigate} />
@@ -684,4 +660,3 @@ function App() {
 }
 
 export default App;
-

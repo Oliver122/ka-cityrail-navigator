@@ -1,0 +1,32 @@
+.manual-mode-banner {
+  display: flex;
+  align-items: center;
+  gap: 0.875rem;
+  padding: 1rem 1.25rem;
+  background: var(--primary-container);
+  border-radius: 0.75rem;
+  color: var(--on-primary-container);
+  font-size: 0.9rem;
+}
+
+.manual-mode-banner svg {
+  flex-shrink: 0;
+  color: var(--primary);
+}
+
+.manual-mode-banner button {
+  margin-left: auto;
+  background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dim) 100%);
+  border: none;
+  border-radius: 0.75rem;
+  padding: 0.5rem 1rem;
+  color: var(--on-primary-container);
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: transform 0.15s ease-in-out;
+}
+
+.manual-mode-banner button:hover {
+  transform: scale(1.03);
+}

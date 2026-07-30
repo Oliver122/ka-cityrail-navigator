@@ -2,23 +2,16 @@ import { useState, useCallback, useRef, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Stop, ManualCoords, DisplaySettings, saveStarred, saveManualCoords, saveDisplaySettings } from "./storage";
 import { ConnectionInfo } from "./types";
-import { 
-  WifiIcon, 
-  EthernetIcon, 
-  SearchIcon, 
-  RefreshIcon, 
-  CloseIcon, 
-  PlusIcon,
-  LocationIcon,
-  StarIcon,
-  SettingsIcon,
-} from "./components/Icons";
+import type { StationViewerKind } from "./stationViewerKind";
+import {
+  ManualCoordsSection,
+  DisplaySettingsSection,
+  SavedTerminalsSection,
+  KnownNetworksSection,
+  FactoryResetSection,
+  type KnownNetwork,
+} from "./components";
 import "./Settings.css";
-
-interface Network {
-  ssid: string;
-  label: string;
-}
 
 interface Props {
   starred: Stop[];
@@ -29,19 +22,26 @@ interface Props {
   onDisplaySettingsChange: (settings: DisplaySettings) => void;
 }
 
-export default function Settings({ starred, manualCoords, displaySettings, onStarredChange, onCoordsChange, onDisplaySettingsChange }: Props) {
+export default function Settings({
+  starred,
+  manualCoords,
+  displaySettings,
+  onStarredChange,
+  onCoordsChange,
+  onDisplaySettingsChange,
+}: Props) {
   const [lat, setLat] = useState(String(manualCoords.lat));
   const [lon, setLon] = useState(String(manualCoords.lon));
   const [coordsSaved, setCoordsSaved] = useState(false);
 
-  // Display settings state (kept as strings so the user can freely edit,
-  // e.g. clear the field before typing a new number; clamped on save)
   const [nearbyLimit, setNearbyLimit] = useState(String(displaySettings.nearbyStopsLimit));
   const [timeWindow, setTimeWindow] = useState(String(displaySettings.timeWindowMinutes));
+  const [stationViewerKind, setStationViewerKind] = useState<StationViewerKind>(
+    displaySettings.stationViewerKind,
+  );
   const [displaySaved, setDisplaySaved] = useState(false);
 
-  // Networks state
-  const [networks, setNetworks] = useState<Network[]>([]);
+  const [networks, setNetworks] = useState<KnownNetwork[]>([]);
   const [currentConn, setCurrentConn] = useState<ConnectionInfo | null | "loading">("loading");
   const [newSsid, setNewSsid] = useState("");
   const [newLabel, setNewLabel] = useState("");
@@ -55,7 +55,7 @@ export default function Settings({ starred, manualCoords, displaySettings, onSta
   }, []);
 
   useEffect(() => {
-    invoke<Network[]>("get_networks").then(setNetworks).catch(() => {});
+    invoke<KnownNetwork[]>("get_networks").then(setNetworks).catch(() => {});
     detectConn();
   }, [detectConn]);
 
@@ -66,7 +66,7 @@ export default function Settings({ starred, manualCoords, displaySettings, onSta
     setNetSaving(true);
     try {
       await invoke("add_network", { ssid, label });
-      const updated = await invoke<Network[]>("get_networks");
+      const updated = await invoke<KnownNetwork[]>("get_networks");
       setNetworks(updated);
       setNewSsid("");
       setNewLabel("");
@@ -82,7 +82,7 @@ export default function Settings({ starred, manualCoords, displaySettings, onSta
     setNetSaving(true);
     try {
       await invoke("add_network", { ssid: currentName, label: currentName });
-      const updated = await invoke<Network[]>("get_networks");
+      const updated = await invoke<KnownNetwork[]>("get_networks");
       setNetworks(updated);
     } finally {
       setNetSaving(false);
@@ -118,9 +118,11 @@ export default function Settings({ starred, manualCoords, displaySettings, onSta
     const settings: DisplaySettings = {
       nearbyStopsLimit: clamp(nearbyLimit, 1, 20, displaySettings.nearbyStopsLimit),
       timeWindowMinutes: clamp(timeWindow, 15, 180, displaySettings.timeWindowMinutes),
+      stationViewerKind,
     };
     setNearbyLimit(String(settings.nearbyStopsLimit));
     setTimeWindow(String(settings.timeWindowMinutes));
+    setStationViewerKind(settings.stationViewerKind);
     saveDisplaySettings(settings);
     onDisplaySettingsChange(settings);
     setDisplaySaved(true);
@@ -148,14 +150,12 @@ export default function Settings({ starred, manualCoords, displaySettings, onSta
     debounceRef.current = setTimeout(async () => {
       setSearching(true);
       try {
-        // Search DB (fast, local) and API (KVV stopfinder) in parallel
         const [dbResults, apiResults] = await Promise.allSettled([
           invoke<Stop[]>("search_stops_db", { query: val.trim() }),
           invoke<Stop[]>("search_stops", { query: val.trim() }),
         ]);
-        const db  = dbResults.status  === "fulfilled" ? dbResults.value  : [];
+        const db = dbResults.status === "fulfilled" ? dbResults.value : [];
         const api = apiResults.status === "fulfilled" ? apiResults.value : [];
-        // Merge, deduplicate by id, DB results first
         const seen = new Set<string>();
         const merged: Stop[] = [];
         for (const s of [...db, ...api]) {
@@ -170,11 +170,8 @@ export default function Settings({ starred, manualCoords, displaySettings, onSta
     }, 400);
   }, []);
 
-  const starredIds = new Set(starred.map((s) => s.id));
-
   return (
     <main className="config-page">
-      {/* Header */}
       <header className="config-header">
         <div className="config-header-top">
           <h1>System Configuration</h1>
@@ -182,258 +179,58 @@ export default function Settings({ starred, manualCoords, displaySettings, onSta
       </header>
 
       <div className="config-content">
-        {/* Manual Coordinates Section */}
-        <section className="config-section">
-          <div className="section-header">
-            <LocationIcon className="section-icon" />
-            <h2>Manual Coordinates</h2>
-          </div>
-          <p className="section-hint">
-            Used when GPS is unavailable or denied.
-          </p>
-          
-          <div className="coords-form">
-            <div className="coord-input-group">
-              <label>Latitude</label>
-              <input
-                type="number"
-                step="any"
-                value={lat}
-                onChange={(e) => { setLat(e.currentTarget.value); setCoordsSaved(false); }}
-                placeholder="49.0090"
-              />
-            </div>
-            <div className="coord-input-group">
-              <label>Longitude</label>
-              <input
-                type="number"
-                step="any"
-                value={lon}
-                onChange={(e) => { setLon(e.currentTarget.value); setCoordsSaved(false); }}
-                placeholder="8.4040"
-              />
-            </div>
-          </div>
-          <button className={`primary-button${coordsSaved ? " success" : ""}`} onClick={saveCoords}>
-            {coordsSaved ? "✓ Saved" : "Update Location"}
-          </button>
-        </section>
+        <ManualCoordsSection
+          lat={lat}
+          lon={lon}
+          saved={coordsSaved}
+          onLatChange={(v) => { setLat(v); setCoordsSaved(false); }}
+          onLonChange={(v) => { setLon(v); setCoordsSaved(false); }}
+          onSave={saveCoords}
+        />
 
-        {/* Display Settings Section */}
-        <section className="config-section">
-          <div className="section-header">
-            <SettingsIcon className="section-icon" />
-            <h2>Display Settings</h2>
-          </div>
-          <p className="section-hint">
-            Control how many stops and departures are shown.
-          </p>
-          
-          <div className="coords-form">
-            <div className="coord-input-group">
-              <label>Nearby Stops (1–20)</label>
-              <input
-                type="number"
-                inputMode="numeric"
-                min="1"
-                max="20"
-                value={nearbyLimit}
-                onChange={(e) => { setNearbyLimit(e.currentTarget.value); setDisplaySaved(false); }}
-                onBlur={() => setNearbyLimit(String(clamp(nearbyLimit, 1, 20, displaySettings.nearbyStopsLimit)))}
-              />
-            </div>
-            <div className="coord-input-group">
-              <label>Time Window (15–180 min)</label>
-              <input
-                type="number"
-                inputMode="numeric"
-                min="15"
-                max="180"
-                value={timeWindow}
-                onChange={(e) => { setTimeWindow(e.currentTarget.value); setDisplaySaved(false); }}
-                onBlur={() => setTimeWindow(String(clamp(timeWindow, 15, 180, displaySettings.timeWindowMinutes)))}
-              />
-            </div>
-          </div>
-          <button className={`primary-button${displaySaved ? " success" : ""}`} onClick={saveDisplay}>
-            {displaySaved ? "✓ Saved" : "Update Settings"}
-          </button>
-        </section>
+        <DisplaySettingsSection
+          nearbyLimit={nearbyLimit}
+          timeWindow={timeWindow}
+          stationViewerKind={stationViewerKind}
+          saved={displaySaved}
+          onNearbyLimitChange={(v) => { setNearbyLimit(v); setDisplaySaved(false); }}
+          onTimeWindowChange={(v) => { setTimeWindow(v); setDisplaySaved(false); }}
+          onStationViewerKindChange={(v) => { setStationViewerKind(v); setDisplaySaved(false); }}
+          onNearbyLimitBlur={() =>
+            setNearbyLimit(String(clamp(nearbyLimit, 1, 20, displaySettings.nearbyStopsLimit)))
+          }
+          onTimeWindowBlur={() =>
+            setTimeWindow(String(clamp(timeWindow, 15, 180, displaySettings.timeWindowMinutes)))
+          }
+          onSave={saveDisplay}
+        />
 
-        {/* Saved Terminals Section */}
-        <section className="config-section">
-          <div className="section-header">
-            <StarIcon filled className="section-icon starred-icon" />
-            <h2>Saved Terminals</h2>
-            {starred.length > 0 && (
-              <span className="section-count">{starred.length} active</span>
-            )}
-          </div>
+        <SavedTerminalsSection
+          starred={starred}
+          query={query}
+          searchResults={searchResults}
+          searching={searching}
+          searchError={searchError}
+          onQueryChange={handleQueryChange}
+          onAdd={addStarred}
+          onRemove={removeStarred}
+        />
 
-          {/* Search to add */}
-          <div className="terminal-search">
-            <SearchIcon className="search-icon" />
-            <input
-              type="text"
-              placeholder="Search stations..."
-              value={query}
-              onChange={(e) => handleQueryChange(e.currentTarget.value)}
-            />
-            {searching && <RefreshIcon className="search-spinner" />}
-          </div>
-          
-          {searchError && <p className="config-error">{searchError}</p>}
-          
-          {searchResults.length > 0 && (
-            <ul className="search-results-list">
-              {searchResults.map((s) => (
-                <li key={s.id} className="search-result-item">
-                  <span className="result-name">{s.name}</span>
-                  <button
-                    className={`add-button${starredIds.has(s.id) ? " added" : ""}`}
-                    onClick={() => addStarred(s)}
-                    disabled={starredIds.has(s.id)}
-                  >
-                    {starredIds.has(s.id) ? (
-                      <>
-                        <StarIcon filled />
-                        <span>Saved</span>
-                      </>
-                    ) : (
-                      <>
-                        <PlusIcon />
-                        <span>Add</span>
-                      </>
-                    )}
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
+        <KnownNetworksSection
+          networks={networks}
+          currentConn={currentConn}
+          newSsid={newSsid}
+          newLabel={newLabel}
+          netSaving={netSaving}
+          onDetect={detectConn}
+          onAddCurrent={addCurrentNetwork}
+          onRemove={removeNetwork}
+          onAdd={addNetwork}
+          onNewSsidChange={setNewSsid}
+          onNewLabelChange={setNewLabel}
+        />
 
-          {starred.length === 0 ? (
-            <p className="empty-state">No saved terminals yet. Search above to add some.</p>
-          ) : (
-            <ul className="terminals-list">
-              {starred.map((s) => (
-                <li key={s.id} className="terminal-item">
-                  <div className="terminal-info">
-                    <span className="terminal-name">{s.name}</span>
-                    <span className="terminal-coords">{s.latitude.toFixed(4)}, {s.longitude.toFixed(4)}</span>
-                  </div>
-                  <button className="remove-button" onClick={() => removeStarred(s.id)} title="Remove">
-                    <CloseIcon />
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-        </section>
-
-        {/* Known Networks Section */}
-        <section className="config-section">
-          <div className="section-header">
-            <WifiIcon className="section-icon" />
-            <h2>Known Networks</h2>
-          </div>
-          <p className="section-hint">
-            When connected to one of these networks, a status indicator will appear.
-          </p>
-
-          {/* Current Connection */}
-          <div className="current-connection">
-            {currentConn === "loading" ? (
-              <div className="connection-status detecting">
-                <RefreshIcon className="spin" />
-                <span>Detecting connection...</span>
-              </div>
-            ) : currentConn ? (
-              <div className="connection-status connected">
-                <div className="connection-badge">
-                  {currentConn.conn_type === "wifi" ? <WifiIcon /> : <EthernetIcon />}
-                  <span>{currentConn.conn_type === "wifi" ? "WiFi" : "Ethernet"}</span>
-                </div>
-                <span className="connection-name">{currentConn.name}</span>
-                {networks.some((n) => n.ssid === currentConn.name) ? (
-                  <span className="connection-saved">✓ Registered</span>
-                ) : (
-                  <button className="register-button" onClick={addCurrentNetwork} disabled={netSaving}>
-                    {netSaving ? "..." : "Register"}
-                  </button>
-                )}
-                <button className="refresh-connection" onClick={detectConn}>
-                  <RefreshIcon />
-                </button>
-              </div>
-            ) : (
-              <div className="connection-status offline">
-                <WifiIcon />
-                <span>No connection detected</span>
-                <button className="refresh-connection" onClick={detectConn}>
-                  <RefreshIcon />
-                </button>
-              </div>
-            )}
-          </div>
-
-          {/* Registered Networks List */}
-          {networks.length > 0 && (
-            <ul className="networks-list">
-              {networks.map((n) => (
-                <li key={n.ssid} className={`network-item${n.ssid === currentName ? " active" : ""}`}>
-                  <div className="network-info">
-                    <WifiIcon className="network-icon" />
-                    <div className="network-details">
-                      <span className="network-label">{n.label}</span>
-                      <span className="network-ssid">{n.ssid}</span>
-                    </div>
-                  </div>
-                  {n.ssid === currentName && (
-                    <span className="network-active-badge">Connected</span>
-                  )}
-                  <button className="remove-button" onClick={() => removeNetwork(n.ssid)} title="Remove">
-                    <CloseIcon />
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-
-          {/* Add Network Form */}
-          <div className="add-network-form">
-            <h3>Register New Node</h3>
-            <div className="network-inputs">
-              <input
-                type="text"
-                placeholder="Network SSID"
-                value={newSsid}
-                onChange={(e) => setNewSsid(e.currentTarget.value)}
-              />
-              <input
-                type="text"
-                placeholder="Label (optional)"
-                value={newLabel}
-                onChange={(e) => setNewLabel(e.currentTarget.value)}
-              />
-            </div>
-            <button 
-              className="primary-button" 
-              onClick={addNetwork} 
-              disabled={netSaving || !newSsid.trim()}
-            >
-              <PlusIcon />
-              <span>Add Network</span>
-            </button>
-          </div>
-        </section>
-
-        {/* Factory Reset */}
-        <section className="config-section danger-section">
-          <button className="danger-button">
-            Factory Reset
-          </button>
-          <p className="danger-hint">This will clear all saved data and settings.</p>
-        </section>
+        <FactoryResetSection />
       </div>
     </main>
   );

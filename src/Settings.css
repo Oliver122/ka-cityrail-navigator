@@ -139,7 +139,8 @@
   letter-spacing: 0.1em;
 }
 
-.coord-input-group input {
+.coord-input-group input,
+.coord-input-group select {
   padding: 0.875rem;
   border-radius: 0.75rem;
   border: 1px solid rgba(168, 164, 184, 0.2);
@@ -150,7 +151,18 @@
   transition: border-color 0.2s ease-in-out;
 }
 
-.coord-input-group input:focus {
+.coord-input-group select {
+  appearance: none;
+  background-image: linear-gradient(45deg, transparent 50%, #a8a4b8 50%),
+    linear-gradient(135deg, #a8a4b8 50%, transparent 50%);
+  background-position: calc(100% - 18px) calc(50% - 3px), calc(100% - 12px) calc(50% - 3px);
+  background-size: 6px 6px, 6px 6px;
+  background-repeat: no-repeat;
+  padding-right: 2rem;
+}
+
+.coord-input-group input:focus,
+.coord-input-group select:focus {
   outline: none;
   border-color: rgba(168, 154, 248, 0.5);
 }

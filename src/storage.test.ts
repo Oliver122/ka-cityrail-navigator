@@ -3,6 +3,7 @@ import {
   loadDisplaySettings,
   loadManualCoords,
   loadStarred,
+  saveDisplaySettings,
 } from "./storage";
 
 describe("storage", () => {
@@ -19,11 +20,41 @@ describe("storage", () => {
     expect(loadManualCoords()).toEqual({ lat: 49.009, lon: 8.404 });
   });
 
-  it("merges display settings with defaults", () => {
+  it("merges display settings with defaults including table viewer", () => {
     localStorage.setItem("ka_display_settings", JSON.stringify({ nearbyStopsLimit: 3 }));
     expect(loadDisplaySettings()).toEqual({
       nearbyStopsLimit: 3,
       timeWindowMinutes: 60,
+      stationViewerKind: "table",
+    });
+  });
+
+  it("loads compact station viewer kind", () => {
+    localStorage.setItem(
+      "ka_display_settings",
+      JSON.stringify({ stationViewerKind: "compact" }),
+    );
+    expect(loadDisplaySettings().stationViewerKind).toBe("compact");
+  });
+
+  it("falls back weird station viewer kind to table", () => {
+    localStorage.setItem(
+      "ka_display_settings",
+      JSON.stringify({ stationViewerKind: "weird" }),
+    );
+    expect(loadDisplaySettings().stationViewerKind).toBe("table");
+  });
+
+  it("round-trips station viewer kind via save/load", () => {
+    saveDisplaySettings({
+      nearbyStopsLimit: 5,
+      timeWindowMinutes: 45,
+      stationViewerKind: "board",
+    });
+    expect(loadDisplaySettings()).toEqual({
+      nearbyStopsLimit: 5,
+      timeWindowMinutes: 45,
+      stationViewerKind: "board",
     });
   });
 });
