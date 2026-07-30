@@ -1,0 +1,69 @@
+.network-status-card {
+  background: var(--surface-container-low);
+  border-radius: 0.75rem;
+  padding: 1.25rem;
+  box-shadow: inset 0 1px 0 0 var(--secondary-dim);
+}
+
+.network-status-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1rem;
+}
+
+.network-status-title {
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--on-surface-variant);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.network-status-live {
+  font-size: 0.8rem;
+  color: var(--secondary);
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.network-status-live::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  background: var(--secondary);
+  border-radius: 50%;
+  animation: network-pulse 2s ease-in-out infinite;
+}
+
+@keyframes network-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+.network-status-info {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.network-name {
+  font-weight: 700;
+  font-size: 1rem;
+  color: var(--on-surface);
+}
+
+.network-ssid {
+  font-size: 0.8rem;
+  color: var(--on-surface-muted);
+}
+
+.network-pinned-count {
+  margin-top: 1rem;
+  padding-top: 1rem;
+  font-size: 0.85rem;
+  color: var(--primary);
+  font-weight: 500;
+}

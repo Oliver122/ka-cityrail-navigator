@@ -1,3 +1,11 @@
+import {
+  DEFAULT_STATION_VIEWER_KIND,
+  normalizeStationViewerKind,
+  type StationViewerKind,
+} from "./stationViewerKind";
+
+export type { StationViewerKind };
+
 export interface Stop {
   id: string;
   name: string;
@@ -13,15 +21,17 @@ export interface ManualCoords {
 export interface DisplaySettings {
   nearbyStopsLimit: number;
   timeWindowMinutes: number;
+  stationViewerKind: StationViewerKind;
 }
 
 const STARRED_KEY = "ka_starred_stops";
-const COORDS_KEY  = "ka_manual_coords";
+const COORDS_KEY = "ka_manual_coords";
 const DISPLAY_KEY = "ka_display_settings";
 
 const DEFAULT_DISPLAY: DisplaySettings = {
   nearbyStopsLimit: 8,
   timeWindowMinutes: 60,
+  stationViewerKind: DEFAULT_STATION_VIEWER_KIND,
 };
 
 export function loadStarred(): Stop[] {
@@ -48,11 +58,22 @@ export function saveManualCoords(coords: ManualCoords): void {
 export function loadDisplaySettings(): DisplaySettings {
   try {
     const raw = localStorage.getItem(DISPLAY_KEY);
-    if (raw) return { ...DEFAULT_DISPLAY, ...JSON.parse(raw) };
+    if (raw) {
+      const parsed = JSON.parse(raw) as Partial<DisplaySettings>;
+      return {
+        ...DEFAULT_DISPLAY,
+        ...parsed,
+        stationViewerKind: normalizeStationViewerKind(parsed.stationViewerKind),
+      };
+    }
   } catch { /* ignore */ }
-  return DEFAULT_DISPLAY;
+  return { ...DEFAULT_DISPLAY };
 }
 
 export function saveDisplaySettings(settings: DisplaySettings): void {
-  localStorage.setItem(DISPLAY_KEY, JSON.stringify(settings));
+  const normalized: DisplaySettings = {
+    ...settings,
+    stationViewerKind: normalizeStationViewerKind(settings.stationViewerKind),
+  };
+  localStorage.setItem(DISPLAY_KEY, JSON.stringify(normalized));
 }

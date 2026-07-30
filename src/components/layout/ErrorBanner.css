@@ -1,0 +1,7 @@
+.error-banner {
+  padding: 1rem 1.25rem;
+  background: var(--error-container);
+  border-radius: 0.75rem;
+  color: var(--tertiary);
+  font-size: 0.9rem;
+}
