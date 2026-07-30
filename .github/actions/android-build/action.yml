@@ -1,0 +1,74 @@
+name: 'Android build'
+description: 'Init Tauri Android project, patch manifest, optionally sign, then build APK or AAB'
+
+inputs:
+  artifact:
+    description: 'Artifact type: apk or aab'
+    required: true
+  targets:
+    description: 'Optional --target list for apk builds (e.g. aarch64). Empty = all default targets.'
+    required: false
+    default: ''
+  signed:
+    description: 'Whether to configure release signing before build'
+    required: false
+    default: 'false'
+  key-alias:
+    description: 'Android key alias (required when signed=true)'
+    required: false
+    default: ''
+  key-password:
+    description: 'Android key password (required when signed=true)'
+    required: false
+    default: ''
+  keystore-base64:
+    description: 'Base64-encoded keystore (required when signed=true)'
+    required: false
+    default: ''
+  ndk-home:
+    description: 'NDK_HOME path from setup-android'
+    required: true
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Initialize Android project
+      shell: bash
+      run: npx tauri android init
+
+    - name: Patch Android manifest (WiFi permissions)
+      shell: bash
+      run: ./scripts/patch-android-manifest.sh
+
+    - name: Configure Android signing
+      if: inputs.signed == 'true'
+      uses: ./.github/actions/configure-android-signing
+      with:
+        key-alias: ${{ inputs.key-alias }}
+        key-password: ${{ inputs.key-password }}
+        keystore-base64: ${{ inputs.keystore-base64 }}
+
+    - name: Build Android AAB
+      if: inputs.artifact == 'aab'
+      shell: bash
+      run: npx tauri android build --aab
+      env:
+        NDK_HOME: ${{ inputs.ndk-home }}
+
+    - name: Build Android APK
+      if: inputs.artifact == 'apk'
+      shell: bash
+      run: |
+        set -euo pipefail
+        if [ -n "${{ inputs.targets }}" ]; then
+          npx tauri android build --apk --target ${{ inputs.targets }}
+        else
+          npx tauri android build --apk
+        fi
+      env:
+        NDK_HOME: ${{ inputs.ndk-home }}
+
+    - name: Cleanup keystore
+      if: always() && inputs.signed == 'true'
+      shell: bash
+      run: rm -f "$RUNNER_TEMP/keystore.jks" src-tauri/gen/android/keystore.properties

@@ -1,0 +1,39 @@
+name: Frontend
+
+on:
+  pull_request:
+    branches: [development, main]
+    paths:
+      - 'src/**'
+      - 'public/**'
+      - 'index.html'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'vite.config.ts'
+      - 'tsconfig.json'
+      - 'tsconfig.node.json'
+      - '.github/workflows/frontend.yml'
+      - '.github/actions/setup-node-npm/**'
+
+concurrency:
+  group: frontend-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  frontend:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+
+      - name: Setup Node.js and npm
+        uses: ./.github/actions/setup-node-npm
+
+      - name: Frontend unit tests
+        run: npm test
+
+      - name: Build frontend
+        run: npm run build

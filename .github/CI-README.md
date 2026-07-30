@@ -1,170 +1,102 @@
 # CI/CD Documentation
 
-This project uses GitHub Actions for continuous integration and deployment.
+GitHub Actions pipelines for KA CityRail Navigator (Tauri v2 + React + Android).
 
-## Workflows
+## Workflow map
 
-### 1. PR Validation (`pr-validation.yml`)
+| Workflow | File | Trigger | What it does |
+|----------|------|---------|--------------|
+| **PR** | `workflows/pr.yml` | PR → `development` / `main` | Conventional Commits title lint |
+| **Frontend** | `workflows/frontend.yml` | PR (path-filtered) | `npm test` + `npm run build` |
+| **Cargo Test** | `workflows/cargo-test.yml` | Push + PR (path-filtered) | `cargo fmt` + `clippy -D warnings` + `cargo test` |
+| **Android PR** | `workflows/android-pr.yml` | PR (path-filtered) or `workflow_dispatch` | Unsigned aarch64 APK smoke build |
+| **Development** | `workflows/development.yml` | Push → `development` | release-please + signed arm64 APK on new tag |
+| **Release** | `workflows/release.yml` | Push → `main` | release-please + signed AAB/APK + optional Play Store |
+| **Security Scans** | `workflows/security.yml` | PR, push, weekly cron | CodeQL + npm/cargo audit |
 
-**Trigger:** Pull requests to `development` or `main`
-
-Validates that the code compiles successfully. Builds a single architecture (aarch64) for speed.
-
-```
-PR opened/updated → Build validation → ✅ Pass or ❌ Fail
-```
-
-### 2. Auto Version (`auto-version.yml`)
-
-**Trigger:** Push to `main` (after PR merge)
-
-Automatically determines version bump based on the merged branch name and creates a release.
-
-#### Versioning Rules
-
-| Branch Pattern | Commit Tag | Version Bump | Example |
-|----------------|------------|--------------|---------|
-| `fix/*` | `[fix]` | Patch (0.0.X) | v1.0.0 → v1.0.1 |
-| `feat/*` | `[feat]` | Minor (0.X.0) | v1.0.0 → v1.1.0 |
-| `bc/*` or `breaking-change/*` | `[breaking]` | Major (X.0.0) | v1.0.0 → v2.0.0 |
-
-**Actions performed:**
-1. Calculates new version from latest git tag
-2. Updates version in:
-   - `package.json`
-   - `src-tauri/tauri.conf.json`
-   - `src-tauri/Cargo.toml`
-3. Commits version bump
-4. Creates git tag (e.g., `v1.2.3`)
-5. Creates GitHub Release with auto-generated notes
-
-### 3. Release Build (`release-build.yml`)
-
-**Trigger:** GitHub Release published
-
-Builds signed Android artifacts and attaches them to the release.
-
-**Outputs:**
-- `ka-cityrail-navigator-vX.X.X.aab` - Android App Bundle (Play Store)
-- `ka-cityrail-navigator-vX.X.X.apk` - APK (Direct install)
-
----
-
-## Flow Diagram
-
-```
-┌──────────────────┐     ┌──────────────────┐     ┌──────────────────┐
-│   PR Created     │     │  Merge to Main   │     │ Release Created  │
-│                  │     │                  │     │                  │
-│  feat/my-feature │────▶│  auto-version    │────▶│  release-build   │
-│                  │     │  detects "feat/" │     │                  │
-└──────────────────┘     │  bumps to v0.2.0 │     │  builds signed   │
-        │                │  creates release │     │  APK + AAB       │
-        ▼                └──────────────────┘     └──────────────────┘
-┌──────────────────┐
-│  pr-validation   │
-│  (build check)   │
-└──────────────────┘
+```mermaid
+flowchart TB
+  subgraph prLanes [Pull request]
+    Lint[PR commit-lint]
+    FE[Frontend]
+    Rust[Cargo Test]
+    And[Android PR]
+  end
+  subgraph pushDev [Push development]
+    DevRP[release-please]
+    DevAPK[signed aarch64 APK]
+    DevRP -->|tag created| DevAPK
+  end
+  subgraph pushMain [Push main]
+    RelRP[release-please]
+    RelBuild[signed AAB and APK]
+    RelRP -->|tag created| RelBuild
+  end
 ```
 
----
+## Path filters (what skips what)
 
-## Required Secrets
+| Change set | Frontend | Cargo Test | Android PR |
+|------------|----------|------------|------------|
+| `src/**` only (no Rust) | runs | skip | skip |
+| `src-tauri/**` | skip* | runs | runs |
+| `scripts/patch-android-manifest.sh` | skip | skip | runs |
+| Docs / LICENSE only | skip | skip | skip |
 
-Configure these in **Settings → Secrets and variables → Actions**:
+\* Frontend still runs if the PR also touches FE paths (`package.json`, `vite.config.ts`, etc.).
 
-| Secret | Description | How to Generate |
-|--------|-------------|-----------------|
-| `ANDROID_KEYSTORE_BASE64` | Base64-encoded keystore file | `base64 -w0 release.keystore` |
-| `ANDROID_KEYSTORE_PASSWORD` | Keystore password | Your keystore password |
-| `ANDROID_KEY_ALIAS` | Signing key alias | Usually `release` or `upload` |
-| `ANDROID_KEY_PASSWORD` | Signing key password | Your key password |
-| `PLAY_STORE_SERVICE_ACCOUNT_JSON` | Google Play API credentials | [See below](#play-store-setup) |
+**Force Android PR** without touching those paths: Actions → **Android PR** → **Run workflow**.
 
-### Creating a Keystore
+## Composite actions
 
-```bash
-keytool -genkey -v -keystore release.keystore -alias release -keyalg RSA -keysize 2048 -validity 10000
-```
+Lean setup pieces under `.github/actions/` (no mega `setup-environment`):
 
-### Encoding Keystore for GitHub
+| Action | Role |
+|--------|------|
+| `setup-node-npm` | Node 20 + `npm ci` |
+| `setup-rust` | Toolchain, optional GTK, cargo cache (`cache-key-prefix` separates desktop vs android) |
+| `setup-android` | Java 17 + SDK + NDK |
+| `android-build` | `tauri android init` → manifest patch → optional signing → APK/AAB |
+| `configure-android-signing` | Keystore + Gradle release signing |
 
-```bash
-# Linux/macOS
-base64 -w0 release.keystore | xclip -selection clipboard
+## Required checks (branch protection)
 
-# Or save to file
-base64 -w0 release.keystore > keystore.b64
-```
+Suggested settings for `development` / `main`:
 
----
+- Always: **PR / commit-lint**, **Frontend / frontend**
+- When present (path-filtered): **Cargo Test / rust**, **Android PR / apk**
 
-## Optional Variables
+Configure “required if present” / soft-required checks in GitHub so FE-only PRs are not blocked waiting for Android.
 
-Configure in **Settings → Secrets and variables → Actions → Variables**:
+## Secrets and variables
 
-| Variable | Value | Description |
-|----------|-------|-------------|
-| `AUTO_PUBLISH_PLAYSTORE` | `true` | Automatically upload to Play Store on release |
+**Secrets** (Settings → Secrets and variables → Actions):
 
----
+| Secret | Used by |
+|--------|---------|
+| `ANDROID_KEYSTORE_BASE64` | Development, Release |
+| `ANDROID_KEY_ALIAS` | Development, Release |
+| `ANDROID_KEY_PASSWORD` | Development, Release |
+| `PLAY_STORE_SERVICE_ACCOUNT_JSON` | Release → Play Store job |
 
-## Play Store Setup
+**Variables:**
 
-To enable automatic Play Store uploads:
+| Variable | Value | Effect |
+|----------|-------|--------|
+| `AUTO_PUBLISH_PLAYSTORE` | `true` | Upload AAB to Play internal track on main release |
 
-1. Go to [Google Play Console](https://play.google.com/console)
-2. Navigate to **Settings → API access**
-3. Create a new service account or link existing
-4. Grant **Release manager** permissions
-5. Download the JSON key file
-6. Add the entire JSON content as `PLAY_STORE_SERVICE_ACCOUNT_JSON` secret
-
----
-
-## Branch Naming Convention
-
-Use these prefixes for automatic version bumping:
-
-```
-fix/issue-123-button-bug      → Patch release (0.0.X)
-feat/add-dark-mode            → Minor release (0.X.0)
-bc/new-api-format             → Major release (X.0.0)
-breaking-change/v2-migration  → Major release (X.0.0)
-```
-
----
-
-## Manual Version Override
-
-If you need to set a specific version manually:
-
-```bash
-# Update all version files
-npm version 2.0.0 --no-git-tag-version
-sed -i 's/"version": "[^"]*"/"version": "2.0.0"/' src-tauri/tauri.conf.json
-sed -i '0,/^version = /s/^version = "[^"]*"/version = "2.0.0"/' src-tauri/Cargo.toml
-
-# Commit and tag
-git add -A
-git commit -m "chore: bump version to v2.0.0"
-git tag v2.0.0
-git push && git push --tags
-```
-
----
+Versioning is owned by **release-please** (`release-please-config.json` / `release-please-config-dev.json`), not branch-name heuristics.
 
 ## Troubleshooting
 
-### Build fails with keystore error
-- Verify `ANDROID_KEYSTORE_BASE64` is correctly encoded
-- Check that alias and passwords match your keystore
+### Android PR did not run
+Path filter skipped it. Touch `src-tauri/` or use **workflow_dispatch** on Android PR.
 
-### Version not bumping correctly
-- Ensure branch name starts with `fix/`, `feat/`, `bc/`, or `breaking-change/`
-- Check the merge commit message in the Actions log
+### Frontend did not run
+Only docs changed, or no FE paths in the PR. Touch `src/` or `package.json` to trigger.
 
-### Play Store upload fails
-- Verify service account has correct permissions
-- Ensure app is already created in Play Console
-- Check package name matches `com.oliver.ka-cityrail-navigator`
+### Signed build fails on keystore
+Check `ANDROID_KEYSTORE_BASE64` encoding and alias/password secrets in the `Vars` environment.
+
+### Cargo Test vs Android caches
+Desktop tests use `cargo-test-*` cache keys; Android builds use `cargo-android-*` so they do not thrash each other.
