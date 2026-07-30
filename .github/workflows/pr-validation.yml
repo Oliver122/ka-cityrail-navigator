@@ -60,14 +60,7 @@ jobs:
       - name: Build frontend
         run: npm run build
 
-      - name: Rust formatting check
-        run: cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
-
-      - name: Rust lint check
-        run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings
-
-      - name: Rust tests
-        run: cargo test --manifest-path src-tauri/Cargo.toml --all-features
+      # Rust fmt/clippy/test live in cargo-test.yml (push + PR) — avoid duplicate runs here.
 
       - name: Initialize Android project
         run: npx tauri android init

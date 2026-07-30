@@ -20,7 +20,7 @@ On execute, also write this same requirements body into repo as [`docs/REQUIREME
 
 | Area | Files | Phase |
 |------|-------|-------|
-| CI Rust pipeline | new `.github/workflows/cargo-test.yml`; keep clippy/test in `pr-validation.yml` | 1 |
+| CI Rust pipeline | `.github/workflows/cargo-test.yml` only (fmt/clippy/test on push+PR); not duplicated in PR Validation | 1 |
 | Pure Rust helpers | [`src-tauri/src/helpers.rs`](src-tauri/src/helpers.rs) | 2 test / 3 untouched unless bugfix |
 | SQLite repo | [`src-tauri/src/db.rs`](src-tauri/src/db.rs) | 2 test / 3 untouched unless bugfix |
 | KVV JSON→domain | logic today inside [`src-tauri/src/kvv.rs`](src-tauri/src/kvv.rs) → new `kvv_parse.rs` | 3 |
@@ -61,14 +61,14 @@ Create [`.github/workflows/cargo-test.yml`](.github/workflows/cargo-test.yml):
 | clippy | `cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings` |
 | test | `cargo test --manifest-path src-tauri/Cargo.toml --all-features` |
 
-### REQ-CI-3 — PR validation still has Rust checks
+### REQ-CI-3 — No duplicate Rust gate in PR Validation
 
-[`pr-validation.yml`](.github/workflows/pr-validation.yml) keeps the same three Rust steps (full PR also builds FE + Android). No removal.
+[`pr-validation.yml`](.github/workflows/pr-validation.yml) does **not** re-run fmt/clippy/`cargo test`. It owns FE (`npm test` / build) + Android APK. Rust quality is owned by `cargo-test.yml` only.
 
 ### Gate 1
 
-- [ ] REQ-CI-1, REQ-CI-2, REQ-CI-3 done
-- [ ] One successful workflow run on the branch (empty test suite allowed)
+- [x] REQ-CI-1, REQ-CI-2, REQ-CI-3 done
+- [x] One successful workflow run on the branch (empty test suite allowed)
 
 **Stop.** No product tests or refactors until Gate 1.
 
