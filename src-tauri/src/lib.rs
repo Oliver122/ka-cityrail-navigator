@@ -1,6 +1,7 @@
 mod db;
 mod helpers;
 mod kvv;
+mod kvv_parse;
 mod network;
 mod schema;
 mod types;

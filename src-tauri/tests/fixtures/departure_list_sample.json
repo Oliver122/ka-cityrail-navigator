@@ -1,0 +1,31 @@
+{
+  "departureList": [
+    {
+      "stopName": "Karlsruhe Hbf",
+      "stopID": "de:8212:1",
+      "platform": "1",
+      "countdown": "5",
+      "servingLine": {
+        "number": "S1",
+        "name": "S-Bahn",
+        "motType": "1",
+        "direction": "Hochstetten",
+        "stateless": "line-stateless-1",
+        "delay": "0",
+        "tripCode": "42",
+        "attrs": []
+      },
+      "dateTime": {
+        "year": "2024",
+        "month": "1",
+        "day": "15",
+        "hour": "14",
+        "minute": "30"
+      },
+      "attrs": [
+        { "name": "RealtimeTripId", "value": "xT0.42y" },
+        { "name": "AVMSTripID", "value": "avms-1" }
+      ]
+    }
+  ]
+}

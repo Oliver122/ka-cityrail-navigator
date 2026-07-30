@@ -2,7 +2,18 @@ import { useEffect, useState, useCallback, useRef, TouchEvent } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentPosition, requestPermissions } from "@tauri-apps/plugin-geolocation";
 import { Stop, ManualCoords, DisplaySettings, loadStarred, saveStarred, loadManualCoords, loadDisplaySettings } from "./storage";
-import { ConnectionInfo, AppPage, DepartureDetail, RouteStop } from "./types";
+import {
+  ConnectionInfo,
+  AppPage,
+  DepartureDetail,
+  Departure,
+  NetworkInfo,
+  TripStopSeqResponse,
+} from "./types";
+import { haversineKm, formatDist } from "./utils/geo";
+import { formatCountdown, kvDateTimeToDisplay } from "./utils/time";
+import { withTimeout } from "./utils/async";
+import { createMockRouteStops } from "./utils/mockRoute";
 import { 
   BottomNav, 
   LineBadge,
@@ -26,96 +37,8 @@ import "./App.css";
 // Page order for swipe navigation
 const PAGE_ORDER: AppPage[] = ["departures", "settings"];
 
-interface NetworkInfo {
-  ssid: string;
-  label: string;
-}
-
-// ── Types ─────────────────────────────────────────────────────────────────────
-
-interface Departure {
-  stop_name: string;
-  stop_id: string;
-  line: string;
-  line_type: string;
-  mot_type: string;
-  direction: string;
-  platform: string;
-  planned_time: string;
-  real_time: string;
-  delay_minutes: number;
-  countdown: number;
-  trip_code: string;
-  line_stateless: string;
-  realtime_trip_id: string;
-  avms_trip_id: string;
-  service_date: string;
-  service_time: string;
-}
-
-interface TripRouteStop {
-  id: string;
-  name: string;
-  platform: string;
-  arrival_time: string;
-  departure_time: string;
-  longitude?: number;
-  latitude?: number;
-}
-
-interface TripStopSeqResponse {
-  trip_code: string;
-  line_stateless: string;
-  line_name: string;
-  line_number: string;
-  destination: string;
-  path: string;
-  route_stops: TripRouteStop[];
-}
-
-// ── Constants ─────────────────────────────────────────────────────────────────
-
-/** When countdown exceeds this value (minutes) show real_time instead of "N min". */
-const MAX_COUNTDOWN_DISPLAY_MIN = 20;
-
 /** Max time (ms) to wait for a route/invoke call before giving up. */
 const INVOKE_TIMEOUT_MS = 12_000;
-
-function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
-  return new Promise<T>((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error(`${label}: timed out after ${ms}ms`)), ms);
-    promise.then(
-      (v) => { clearTimeout(timer); resolve(v); },
-      (e) => { clearTimeout(timer); reject(e); },
-    );
-  });
-}
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
-function haversineKm(lat1: number, lon1: number, lat2: number, lon2: number): number {
-  const R = 6371;
-  const dlat = (lat2 - lat1) * Math.PI / 180;
-  const dlon = (lon2 - lon1) * Math.PI / 180;
-  const a = Math.sin(dlat / 2) ** 2
-    + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dlon / 2) ** 2;
-  return R * 2 * Math.asin(Math.sqrt(a));
-}
-
-function formatDist(km: number): string {
-  return km < 1 ? `${Math.round(km * 1000)}m` : `${km.toFixed(1)}km`;
-}
-
-function formatCountdown(countdown: number, realTime: string): { text: string; className: string } {
-  if (countdown <= 0) return { text: "now", className: "eta-now" };
-  if (countdown <= MAX_COUNTDOWN_DISPLAY_MIN) return { text: `${countdown} min`, className: "eta-soon" };
-  return { text: realTime, className: "eta-later" };
-}
-
-function kvDateTimeToDisplay(value: string): string {
-  const parts = value.split(" ");
-  if (parts.length < 2) return "";
-  return parts[1].slice(0, 5);
-}
 
 /** Group departures by platform (Gleis), sorted numerically ("2" before "10"). */
 function groupByPlatform(deps: Departure[]): [string, Departure[]][] {
@@ -129,16 +52,6 @@ function groupByPlatform(deps: Departure[]): [string, Departure[]][] {
   return [...groups.entries()].sort(([a], [b]) =>
     a.localeCompare(b, undefined, { numeric: true })
   );
-}
-
-// Create mock route stops for departure details
-function createMockRouteStops(departure: Departure, stopName: string): RouteStop[] {
-  return [
-    { id: "1", name: "Hauptbahnhof", arrivalTime: departure.planned_time, status: "passed" },
-    { id: "2", name: stopName, arrivalTime: departure.real_time, status: "current", delayMinutes: departure.delay_minutes },
-    { id: "3", name: "Marktplatz", arrivalTime: "", status: "upcoming" },
-    { id: "4", name: departure.direction, arrivalTime: "", status: "upcoming" },
-  ];
 }
 
 // ── App ───────────────────────────────────────────────────────────────────────

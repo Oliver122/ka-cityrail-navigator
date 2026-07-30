@@ -1,0 +1,40 @@
+{
+  "stopSeqCoords": {
+    "params": {
+      "mode": {
+        "name": "S-Bahn",
+        "number": "S1",
+        "destination": "Marktplatz",
+        "diva": {
+          "tripCode": "99",
+          "stateless": "line-stateless-1"
+        }
+      },
+      "stopSeq": [
+        {
+          "name": "Karlsruhe Hbf",
+          "platformName": "1",
+          "ref": {
+            "id": "de:8212:1",
+            "coords": "8.4,49.0",
+            "arrDateTime": "2024-01-15 14:00:00",
+            "depDateTime": "2024-01-15 14:02:00"
+          }
+        },
+        {
+          "name": "Marktplatz",
+          "platformName": "2",
+          "ref": {
+            "id": "de:8212:2",
+            "coords": "8.5,49.1",
+            "arrDateTime": "2024-01-15 14:10:00",
+            "depDateTime": "2024-01-15 14:10:00"
+          }
+        }
+      ]
+    },
+    "coords": {
+      "path": "8.4,49.0 8.5,49.1 8.6,49.2"
+    }
+  }
+}
